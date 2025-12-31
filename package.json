@@ -1,0 +1,29 @@
+{
+  "name": "face-chat",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/server/index.ts",
+    "start": "bun run src/server/index.ts",
+    "start:daemon": "nohup bun run src/server/index.ts > logs/output.log 2>&1 & echo $! > .pid",
+    "stop": "kill $(cat .pid) && rm .pid",
+    "restart": "bun run stop && bun run start:daemon",
+    "logs": "tail -f logs/output.log",
+    "db:setup": "bun run src/db/setup.ts"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.18.9",
+    "@atproto/lexicon": "^0.6.0",
+    "@atproto/oauth-client-browser": "^0.3.38",
+    "@atproto/oauth-client-node": "^0.3.14",
+    "@atproto/repo": "^0.8.12",
+    "@elysiajs/cookie": "^0.8.0",
+    "@elysiajs/html": "^1.4.0",
+    "@elysiajs/static": "^1.4.7",
+    "elysia": "^1.4.19",
+    "open-props": "^1.7.17"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14"
+  }
+}

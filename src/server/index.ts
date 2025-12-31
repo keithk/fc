@@ -1,0 +1,304 @@
+/**
+ * keith's friend club
+ * a simple video chat app using bluesky oauth
+ *
+ * features:
+ * - bluesky oauth login
+ * - 2-second video recording
+ * - websocket-based chat
+ * - last 20 messages stored in sqlite
+ */
+
+import { Elysia } from "elysia";
+import { staticPlugin } from "@elysiajs/static";
+import { html } from "@elysiajs/html";
+import { cookie } from "@elysiajs/cookie";
+import { chatRoutes } from "./routes/chat";
+import { authRoutes } from "./routes/auth";
+import { historyRoutes } from "./routes/history";
+import { oauthRoutes } from "./routes/oauth";
+import { websocketHandler } from "./websocket";
+import { APP_CONFIG } from "../shared/config";
+import { messageService } from "../db/messages";
+
+const app = new Elysia()
+  .use(html())
+  .use(cookie())
+  .use(
+    staticPlugin({
+      assets: "src/public",
+      prefix: "/public",
+    }),
+  )
+  .use(chatRoutes)
+  .use(authRoutes)
+  .use(historyRoutes)
+  .use(oauthRoutes)
+  .use(websocketHandler)
+
+  // bluesky oauth client metadata endpoint
+  // this is required for oauth to work - bluesky fetches this to verify your app
+  .get("/oauth-client-metadata.json", ({ headers }) => {
+    // dynamically build the origin from request headers
+    // this allows the app to work locally, with ngrok, and in production
+    const host = headers["host"] || "127.0.0.1:3891";
+    const forwardedProto = headers["x-forwarded-proto"];
+    const protocol =
+      forwardedProto ||
+      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
+    const origin = `${protocol}://${host}`;
+
+    return Response.json(
+      {
+        client_id: `${origin}/oauth-client-metadata.json`,
+        client_name: APP_CONFIG.appName,
+        client_uri: origin,
+        logo_uri: `${origin}/logo.png`,
+        tos_uri: `${origin}/terms`,
+        policy_uri: `${origin}/privacy`,
+        redirect_uris: [`${origin}/oauth/callback`],
+        response_types: ["code"],
+        grant_types: ["authorization_code", "refresh_token"],
+        scope: "atproto app.bsky.feed.post com.atproto.repo.uploadBlob",
+        token_endpoint_auth_method: "none",
+        application_type: "web",
+        dpop_bound_access_tokens: true,
+      },
+      {
+        headers: {
+          // prevent caching so oauth always gets fresh metadata
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      },
+    );
+  })
+
+  // export all messages as json
+  .get("/api/messages/export", ({ set }) => {
+    const allMessages = messageService.getAllMessages();
+
+    set.headers["Content-Type"] = "application/json";
+    set.headers["Content-Disposition"] =
+      'attachment; filename="friend-club-messages.json"';
+
+    return JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        totalMessages: allMessages.length,
+        messages: allMessages,
+      },
+      null,
+      2,
+    );
+  })
+  .get("/privacy", () => {
+    const timestamp = Date.now();
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Privacy Policy - keith's friend club 🐻</title>
+        <link rel="stylesheet" href="/public/css/main.css?v=${timestamp}" />
+      </head>
+      <body>
+        <main>
+          <h1>🐻 keith's friend club</h1>
+          <h2>Privacy Policy</h2>
+
+          <!-- Keith's Intro with Speech Bubble -->
+          <div style="display: flex; gap: 2rem; align-items: start; margin-bottom: 2rem; flex-wrap: wrap;">
+            <img src="/public/keith.png?v=${timestamp}" alt="Keith" style="width: 200px; height: 200px; border: 2px solid black; border-radius: 8px; flex-shrink: 0;" />
+            <div style="flex: 1; min-width: 300px; position: relative; background: white; border: 2px solid black; padding: 1.5rem; border-radius: 12px;">
+              <div style="position: absolute; left: -12px; top: 40px; width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-right: 12px solid black;"></div>
+              <div style="position: absolute; left: -10px; top: 40px; width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-right: 12px solid white;"></div>
+              <p style="margin: 0; font-size: 1.1rem; line-height: 1.6;">
+                hey! i'm <a href="https://keith.is" target="_blank" style="color: var(--pink); font-weight: 700; text-decoration: none;">keith</a> and i made this little club for fun. i keep the last 20 messages in a database so they don't disappear when the server restarts, but that's it. no tracking. just storage for 20 messages and 2 second videos.
+              </p>
+            </div>
+          </div>
+
+          <!-- Official Privacy Details -->
+          <div style="padding: 2rem; background: #f5f5f5; border: 2px solid black; line-height: 1.8;">
+            <h3 style="margin-top: 0;">What I Store</h3>
+
+            <p><strong>Chat Messages:</strong> I store your last 20 chat messages in a local SQLite database. This includes:</p>
+            <ul style="margin-left: 2rem;">
+              <li>Your Bluesky handle</li>
+              <li>Your message text</li>
+              <li>Your 2-second video (as a data URL)</li>
+              <li>Message timestamp</li>
+            </ul>
+
+            <p><strong>Automatic Deletion:</strong> Messages are automatically deleted once I have more than 20 messages in the database. I only keep the 20 most recent messages.</p>
+
+            <p><strong>Download Your Data:</strong> You can download all stored messages at any time: <a href="/api/messages/export" style="color: var(--pink); font-weight: 700;">Download Messages JSON</a></p>
+
+            <h3>Videos and Bluesky</h3>
+
+            <p><strong>Local Videos:</strong> The 2-second videos you record are converted to video format and stored as data URLs in my database. They are deleted along with messages as described above.</p>
+
+            <p><strong>When You Post to Bluesky:</strong> If you check the "Post to Bluesky" option, your video is uploaded to your Personal Data Server (PDS) as a blob and attached to your post. These blobs are stored on <em>your</em> PDS, not on my servers.</p>
+
+            <p>You can explore what's stored on your PDS using <a href="https://pdsls.dev/" target="_blank" style="color: var(--teal); font-weight: 700;">pdsls.dev</a> - just enter your Bluesky handle to see all blobs and data stored on your Personal Data Server. You can see the account I used for testing <a href="https://pdsls.dev/at://did:plc:34cz7auqhzl2rq62fg6mobut#blobs" target="_blank" style="color: var(--teal); font-weight: 700;">here</a> (isn't that cool??)</p>
+
+            <h3>What I Don't Do</h3>
+
+            <ul style="margin-left: 2rem;">
+              <li>I don't use analytics or tracking</li>
+              <li>I don't sell or share your data</li>
+              <li>I don't store IP addresses or personal information beyond what's shown in the chat</li>
+              <li>I don't have access to your Bluesky password (I use OAuth)</li>
+            </ul>
+
+            <p style="margin-top: 2rem; margin-bottom: 0;"><a href="/" style="color: var(--pink); font-weight: 700;">← Back to Friend Club</a></p>
+          </div>
+        </main>
+      </body>
+      </html>
+    `;
+  })
+
+  // main app page
+  .get("/", ({ headers }) => {
+    const timestamp = Date.now();
+
+    // dynamically build the origin for oauth config
+    const host = headers["host"] || "127.0.0.1:3891";
+    const forwardedProto = headers["x-forwarded-proto"];
+    const protocol =
+      forwardedProto ||
+      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
+    const origin = `${protocol}://${host}`;
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>keith's friend club 🐻</title>
+        <link rel="stylesheet" href="/public/css/main.css?v=${timestamp}" />
+        <script src="/public/js/gif.js"></script>
+      </head>
+      <body>
+        <main>
+          <h1>🐻 keith's friend club</h1>
+
+          <div class="instructions">
+            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video of yourself, write a message, and share it here (and optionally on Bluesky too!).</p>
+          </div>
+
+          <div class="chat-container">
+            <!-- Left Column: Auth + Camera + Message -->
+            <div class="left-column">
+              <!-- Auth Section -->
+              <div id="auth-section" class="auth-section">
+                <div id="login-form" class="login-form">
+                  <input
+                    type="text"
+                    id="bluesky-handle"
+                    placeholder="Enter your Bluesky handle (e.g., alice.bsky.social)"
+                    class="text-input"
+                  />
+                  <button id="login-button" class="button button-primary">
+                    🦋 Login with Bluesky
+                  </button>
+                </div>
+                <div id="user-info" class="user-info" style="display:none;">
+                  <span id="user-handle"></span>
+                  <button id="logout-button" class="button">Logout</button>
+                </div>
+              </div>
+
+              <!-- Camera Section -->
+              <div id="camera-section" class="camera-section disabled">
+                <div class="disabled-overlay">
+                  <p>🔒 Log in to start recording</p>
+                </div>
+                <video id="video-preview" class="video-preview" autoplay playsinline></video>
+                <canvas id="gif-canvas" style="display:none;"></canvas>
+                <video id="gif-preview" class="gif-preview" style="display:none;" autoplay loop muted playsinline></video>
+                <div id="countdown" class="countdown"></div>
+
+                <div class="camera-controls">
+                  <button id="start-camera" class="button" disabled>📷 Start Camera</button>
+                  <button id="record-button" class="button" disabled>🔴 Record GIF</button>
+                  <button id="clear-gif" class="button" style="display:none;">Clear</button>
+                </div>
+              </div>
+
+              <!-- Message Input -->
+              <div id="message-section" class="chat-input disabled">
+                <div class="disabled-overlay">
+                  <p>🔒 Log in to send messages</p>
+                </div>
+                <textarea
+                  id="message-text"
+                  class="text-input"
+                  placeholder="Type your message (max 255 chars)..."
+                  maxlength="255"
+                  rows="3"
+                  disabled
+                ></textarea>
+                <div class="input-footer">
+                  <span id="char-count" class="char-count">0 / 255</span>
+                  <label class="post-to-bluesky">
+                    <input type="checkbox" id="post-to-bluesky" checked disabled />
+                    <span>Post to Bluesky</span>
+                  </label>
+                  <button id="send-button" class="button button-primary" disabled>
+                    Send Message
+                  </button>
+                </div>
+              </div>
+
+              <!-- Rate Limit Warning -->
+              <div id="rate-limit-warning" class="warning" style="display:none;">
+                ⏰ You can only send one message per minute
+              </div>
+            </div>
+
+            <!-- Right Column: Messages -->
+            <div class="right-column">
+              <div class="messages-section">
+                <h2>Recent Messages</h2>
+                <div class="messages" id="messages-container"></div>
+              </div>
+            </div>
+          </div>
+
+          <footer style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid black; text-align: center;">
+            <a href="/privacy" style="color: var(--teal); font-weight: 700; text-decoration: none;">Privacy Policy</a>
+          </footer>
+        </main>
+
+        <script>
+          // oauth config needs to match the current host (local, ngrok, or production)
+          window.OAUTH_CONFIG = {
+            clientId: '${origin}/oauth-client-metadata.json',
+            redirectUri: '${origin}/oauth/callback',
+            scopes: 'atproto app.bsky.feed.post com.atproto.repo.uploadBlob'
+          }
+        </script>
+        <script src="/public/js/capture.js?v=${timestamp}"></script>
+        <script src="/public/js/chat.js?v=${timestamp}"></script>
+        <script src="/public/js/auth-oauth.js?v=${timestamp}"></script>
+      </body>
+      </html>
+    `;
+  });
+const PORT = process.env.PORT || 3891;
+
+app.listen(PORT);
+
+// bun might choose a different port if 3891 is taken, so log the actual port
+const port = app.server?.port || PORT;
+console.log(`🐻 keith's friend club is running at http://127.0.0.1:${port}`);
+console.log(
+  `⚠️  important: use 127.0.0.1 (not localhost) for oauth to work properly`,
+);
