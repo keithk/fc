@@ -18,8 +18,9 @@ interface DbMessage {
 export class SQLiteAdapter implements StorageAdapter {
   private db: Database
 
-  constructor(dbPath: string = 'data/chat.db') {
-    this.db = new Database(dbPath)
+  constructor(dbPath?: string) {
+    const dataDir = process.env.DATA_DIR || 'data'
+    this.db = new Database(dbPath || `${dataDir}/chat.db`)
   }
 
   saveMessage(message: ChatMessage): void {

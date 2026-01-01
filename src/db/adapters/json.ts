@@ -11,11 +11,12 @@ export class JSONAdapter implements StorageAdapter {
   private filePath: string
   private messages: ChatMessage[] = []
 
-  constructor(filePath: string = 'data/messages.json') {
-    this.filePath = filePath
+  constructor(filePath?: string) {
+    const dataDir = process.env.DATA_DIR || 'data'
+    this.filePath = filePath || `${dataDir}/messages.json`
 
     // ensure directory exists
-    const dir = dirname(filePath)
+    const dir = dirname(this.filePath)
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })
     }

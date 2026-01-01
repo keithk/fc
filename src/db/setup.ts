@@ -11,14 +11,16 @@
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'fs'
 
+const dataDir = process.env.DATA_DIR || 'data'
+
 // ensure data directory exists
 try {
-  mkdirSync('data', { recursive: true })
+  mkdirSync(dataDir, { recursive: true })
 } catch {
   // already exists
 }
 
-const db = new Database('data/chat.db')
+const db = new Database(`${dataDir}/chat.db`)
 
 // messages table stores the last 20 chat messages
 db.run(`
