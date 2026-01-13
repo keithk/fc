@@ -72,10 +72,18 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
       const { did } = await resolveResponse.json();
 
       // create authorization url
-      const authUrl = await client.authorize(did, {
-        scope: OAUTH_SCOPE_STRING,
-        state: crypto.randomUUID(),
-      });
+      console.log(`[oauth] Calling client.authorize for DID: ${did}`);
+      let authUrl;
+      try {
+        authUrl = await client.authorize(did, {
+          scope: OAUTH_SCOPE_STRING,
+          state: crypto.randomUUID(),
+        });
+        console.log(`[oauth] Authorization URL created: ${authUrl}`);
+      } catch (authError) {
+        console.error(`[oauth] client.authorize failed:`, authError);
+        throw authError;
+      }
 
       // store session for callback
       const sessionId = crypto.randomUUID();

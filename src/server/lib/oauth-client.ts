@@ -16,6 +16,8 @@ export async function getOAuthClient(origin: string) {
   if (!oauthClients.has(origin)) {
     console.log(`[oauth-client] Creating new OAuth client for: ${origin}`);
     const client = new NodeOAuthClient({
+      // Allow HTTP for development (container internal requests)
+      allowHttp: true,
       clientMetadata: {
         client_id: `${origin}/oauth-client-metadata.json`,
         client_name: APP_CONFIG.appName,
