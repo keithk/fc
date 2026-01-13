@@ -15,9 +15,24 @@ export async function getOAuthClient(origin: string) {
   console.log(`[oauth-client] getOAuthClient called with origin: ${origin}`);
   if (!oauthClients.has(origin)) {
     console.log(`[oauth-client] Creating new OAuth client for: ${origin}`);
+
+    // Custom fetch that bypasses TLS validation for internal requests
+    // This is needed because the container routes fc.keith.is to localhost
+    const customFetch: typeof fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      console.log(`[oauth-client] fetch: ${url}`);
+      return fetch(input, init);
+    };
+
     const client = new NodeOAuthClient({
       // Allow HTTP for development (container internal requests)
       allowHttp: true,
+      fetch: customFetch,
       clientMetadata: {
         client_id: `${origin}/oauth-client-metadata.json`,
         client_name: APP_CONFIG.appName,
