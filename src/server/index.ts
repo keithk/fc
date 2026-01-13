@@ -50,6 +50,8 @@ function getOrigin(headers: Record<string, string | undefined>): string {
 }
 
 const app = new Elysia()
+  // Health check endpoint for container orchestration
+  .get("/health", () => ({ status: "ok" }))
   .use(html())
   .use(cookie())
   .use(
