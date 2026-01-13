@@ -101,7 +101,9 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
       };
 
       // redirect to bluesky oauth
+      console.log(`[oauth] Redirecting to: ${authUrl.toString()}`);
       set.redirect = authUrl.toString();
+      console.log(`[oauth] Returning 302 response`);
       return new Response(null, {
         status: 302,
         headers: {
