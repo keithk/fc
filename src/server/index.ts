@@ -254,7 +254,7 @@ const app = new Elysia()
           <h1>🐻 keith's friend club</h1>
 
           <div class="instructions">
-            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (this is an explainer on another experiment i made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime.</p>
+            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (this is an explainer on another experiment i made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime!</p>
           </div>
 
           <div class="chat-container">
