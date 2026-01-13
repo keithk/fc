@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "is.keith.fc.message",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "createdAt"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "video": {
+            "type": "blob",
+            "accept": ["video/mp4"],
+            "maxSize": 10000000
+          },
+          "blueskyPostUri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Link to cross-posted Bluesky post, if any"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this message should be deleted (optional)"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

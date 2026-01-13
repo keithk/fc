@@ -10,50 +10,58 @@
  *   STORAGE_ADAPTER=json bun run dev
  */
 
-import type { StorageAdapter, ChatMessage } from './adapters/base'
-import { SQLiteAdapter } from './adapters/sqlite'
-import { JSONAdapter } from './adapters/json'
+import type { StorageAdapter, ChatMessage } from "./adapters/base";
+import { SQLiteAdapter } from "./adapters/sqlite";
+import { JSONAdapter } from "./adapters/json";
 
 // choose storage adapter based on env var
 function createAdapter(): StorageAdapter {
-  const adapterType = process.env.STORAGE_ADAPTER || 'sqlite'
+  const adapterType = process.env.STORAGE_ADAPTER || "sqlite";
 
   switch (adapterType.toLowerCase()) {
-    case 'json':
-      return new JSONAdapter()
-    case 'sqlite':
+    case "json":
+      return new JSONAdapter();
+    case "sqlite":
     default:
-      return new SQLiteAdapter()
+      return new SQLiteAdapter();
   }
 }
 
 class MessageService {
-  private adapter: StorageAdapter
+  private adapter: StorageAdapter;
 
   constructor(adapter?: StorageAdapter) {
-    this.adapter = adapter || createAdapter()
+    this.adapter = adapter || createAdapter();
   }
 
   saveMessage(message: ChatMessage): void {
-    this.adapter.saveMessage(message)
+    this.adapter.saveMessage(message);
   }
 
   getRecentMessages(limit: number = 20): ChatMessage[] {
-    return this.adapter.getRecentMessages(limit)
+    return this.adapter.getRecentMessages(limit);
   }
 
   getAllMessages(): ChatMessage[] {
-    return this.adapter.getAllMessages()
+    return this.adapter.getAllMessages();
   }
 
   getMessageCount(): number {
-    return this.adapter.getMessageCount()
+    return this.adapter.getMessageCount();
+  }
+
+  deleteMessage(id: string): void {
+    this.adapter.deleteMessage(id);
+  }
+
+  getExpiredMessages(): ChatMessage[] {
+    return this.adapter.getExpiredMessages();
   }
 
   close(): void {
-    this.adapter.close?.()
+    this.adapter.close?.();
   }
 }
 
-export const messageService = new MessageService()
-export type { ChatMessage }
+export const messageService = new MessageService();
+export type { ChatMessage };

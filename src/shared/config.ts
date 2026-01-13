@@ -9,7 +9,8 @@ const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:3891";
 export const OAUTH_CONFIG = {
   clientId: `${BASE_URL}/oauth-client-metadata.json`,
   redirectUri: `${BASE_URL}/oauth/callback`,
-  scopes: "atproto app.bsky.feed.post com.atproto.repo.uploadBlob",
+  scopes:
+    "atproto repo:is.keith.fc.message app.bsky.feed.post com.atproto.repo.uploadBlob",
 };
 
 export const APP_CONFIG = {

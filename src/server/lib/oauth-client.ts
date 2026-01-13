@@ -23,7 +23,8 @@ export async function getOAuthClient(origin: string) {
         client_name: "keith's friend club",
         client_uri: origin,
         redirect_uris: [`${origin}/oauth/callback`],
-        scope: "atproto app.bsky.feed.post com.atproto.repo.uploadBlob",
+        scope:
+          "atproto repo:is.keith.fc.message app.bsky.feed.post com.atproto.repo.uploadBlob",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",

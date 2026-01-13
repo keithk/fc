@@ -10,13 +10,11 @@
 
 import { Elysia } from "elysia";
 import { getOAuthClient, userSessionStore } from "../lib/oauth-client";
+import { setActiveSession, getActiveSession } from "../lib/sessions";
 import { $ } from "bun";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-
-// store active oauth sessions (in-memory, lost on restart)
-const activeSessions = new Map();
 
 export const oauthRoutes = new Elysia({ prefix: "/oauth" })
   .get("/login", async ({ query, headers, set }) => {
@@ -53,7 +51,8 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
 
       // create authorization url
       const authUrl = await client.authorize(did, {
-        scope: "atproto app.bsky.feed.post com.atproto.repo.uploadBlob",
+        scope:
+          "atproto repo:is.keith.fc.message app.bsky.feed.post com.atproto.repo.uploadBlob",
         state: crypto.randomUUID(),
       });
 
@@ -145,7 +144,7 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
 
       // store oauth session for server-side posting
       const clientSessionId = crypto.randomUUID();
-      activeSessions.set(clientSessionId, session);
+      setActiveSession(clientSessionId, session);
 
       // update user session with handle
       if (handle) {
@@ -275,7 +274,7 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
         return { success: false, error: "No session ID provided" };
       }
 
-      const session = activeSessions.get(sessionId);
+      const session = getActiveSession(sessionId);
       if (!session) {
         return { success: false, error: "Invalid or expired session" };
       }

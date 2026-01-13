@@ -17,9 +17,17 @@ import { chatRoutes } from "./routes/chat";
 import { authRoutes } from "./routes/auth";
 import { historyRoutes } from "./routes/history";
 import { oauthRoutes } from "./routes/oauth";
-import { websocketHandler } from "./websocket";
-import { APP_CONFIG } from "../shared/config";
-import { messageService } from "../db/messages";
+import { apiRoutes } from "./routes/api";
+import {
+  websocketHandler,
+  setServerInstance,
+  broadcastMessage,
+  broadcastDeletion,
+} from "./websocket";
+import { startJetstream, stopJetstream } from "./lib/jetstream";
+import { startCleanupJob, stopCleanupJob } from "./lib/expiration-cleanup";
+import { APP_CONFIG, OAUTH_CONFIG } from "../shared/config";
+import { messageService, type ChatMessage } from "../db/messages";
 
 const app = new Elysia()
   .use(html())
@@ -34,6 +42,7 @@ const app = new Elysia()
   .use(authRoutes)
   .use(historyRoutes)
   .use(oauthRoutes)
+  .use(apiRoutes)
   .use(websocketHandler)
 
   // bluesky oauth client metadata endpoint
@@ -59,7 +68,7 @@ const app = new Elysia()
         redirect_uris: [`${origin}/oauth/callback`],
         response_types: ["code"],
         grant_types: ["authorization_code", "refresh_token"],
-        scope: "atproto app.bsky.feed.post com.atproto.repo.uploadBlob",
+        scope: OAUTH_CONFIG.scopes,
         token_endpoint_auth_method: "none",
         application_type: "web",
         dpop_bound_access_tokens: true,
@@ -247,9 +256,15 @@ const app = new Elysia()
                 ></textarea>
                 <div class="input-footer">
                   <span id="char-count" class="char-count">0 / 255</span>
+                  <select id="expires-in" class="expires-select" disabled>
+                    <option value="">No expiration</option>
+                    <option value="30m">Expires in 30 min</option>
+                    <option value="1h">Expires in 1 hour</option>
+                    <option value="24h">Expires in 24 hours</option>
+                  </select>
                   <label class="post-to-bluesky">
-                    <input type="checkbox" id="post-to-bluesky" checked disabled />
-                    <span>Post to Bluesky</span>
+                    <input type="checkbox" id="post-to-bluesky" disabled />
+                    <span>Also post to Bluesky</span>
                   </label>
                   <button id="send-button" class="button button-primary" disabled>
                     Send Message
@@ -296,9 +311,65 @@ const PORT = process.env.PORT || 3891;
 
 app.listen(PORT);
 
+// Store server reference for WebSocket broadcasts
+setServerInstance(app);
+
 // bun might choose a different port if 3891 is taken, so log the actual port
 const port = app.server?.port || PORT;
 console.log(`🐻 keith's friend club is running at http://127.0.0.1:${port}`);
 console.log(
   `⚠️  important: use 127.0.0.1 (not localhost) for oauth to work properly`,
 );
+
+// Resolve DID to handle for Jetstream events
+async function resolveHandle(did: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(`https://plc.directory/${did}`);
+    if (response.ok) {
+      const didDoc = await response.json();
+      const alsoKnownAs = didDoc.alsoKnownAs?.[0];
+      if (alsoKnownAs && alsoKnownAs.startsWith("at://")) {
+        return alsoKnownAs.replace("at://", "");
+      }
+    }
+  } catch {
+    // Handle resolution failed
+  }
+  return undefined;
+}
+
+// Start Jetstream to listen for new messages
+startJetstream({
+  onMessage: (message: ChatMessage, operation: "create" | "delete") => {
+    if (operation === "create") {
+      // Save to local cache and broadcast to WebSocket clients
+      messageService.saveMessage(message);
+      broadcastMessage(message);
+    } else if (operation === "delete") {
+      // Remove from cache and broadcast deletion
+      messageService.deleteMessage(message.id);
+      broadcastDeletion(message.id);
+    }
+  },
+  resolveHandle,
+});
+
+// Start expiration cleanup job
+startCleanupJob();
+
+// Graceful shutdown
+process.on("SIGINT", () => {
+  console.log("\n🛑 Shutting down...");
+  stopJetstream();
+  stopCleanupJob();
+  messageService.close();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  console.log("\n🛑 Shutting down...");
+  stopJetstream();
+  stopCleanupJob();
+  messageService.close();
+  process.exit(0);
+});
