@@ -11,11 +11,31 @@
 import { Elysia } from "elysia";
 import { getOAuthClient, userSessionStore } from "../lib/oauth-client";
 import { setActiveSession, getActiveSession } from "../lib/sessions";
-import { OAUTH_SCOPE_STRING } from "../../shared/config";
+import { OAUTH_SCOPE_STRING, APP_CONFIG } from "../../shared/config";
 import { $ } from "bun";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+
+// Get the origin URL, preferring BASE_URL env var for production
+function getOrigin(headers: Record<string, string | undefined>): string {
+  // If BASE_URL is set and not localhost, use it (production)
+  if (
+    process.env.BASE_URL &&
+    !process.env.BASE_URL.includes("localhost") &&
+    !process.env.BASE_URL.includes("127.0.0.1")
+  ) {
+    return process.env.BASE_URL;
+  }
+
+  // Otherwise derive from headers (development)
+  const host = headers["host"] || "127.0.0.1:3891";
+  const forwardedProto = headers["x-forwarded-proto"];
+  const protocol =
+    forwardedProto ||
+    (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
+  return `${protocol}://${host}`;
+}
 
 export const oauthRoutes = new Elysia({ prefix: "/oauth" })
   .get("/login", async ({ query, headers, set }) => {
@@ -24,13 +44,7 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
       return new Response("Missing handle", { status: 400 });
     }
 
-    // dynamically determine origin from request headers
-    const host = headers["host"] || "127.0.0.1:3891";
-    const forwardedProto = headers["x-forwarded-proto"];
-    const protocol =
-      forwardedProto ||
-      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
-    const origin = `${protocol}://${host}`;
+    const origin = getOrigin(headers);
 
     try {
       const client = await getOAuthClient(origin);
@@ -99,13 +113,7 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
       return new Response("Missing issuer (iss) parameter", { status: 400 });
     }
 
-    // dynamically determine origin
-    const host = headers["host"] || "127.0.0.1:3891";
-    const forwardedProto = headers["x-forwarded-proto"];
-    const protocol =
-      forwardedProto ||
-      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
-    const origin = `${protocol}://${host}`;
+    const origin = getOrigin(headers);
 
     try {
       const client = await getOAuthClient(origin);

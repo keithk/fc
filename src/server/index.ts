@@ -29,6 +29,26 @@ import { startCleanupJob, stopCleanupJob } from "./lib/expiration-cleanup";
 import { APP_CONFIG, OAUTH_SCOPE_STRING_METADATA } from "../shared/config";
 import { messageService, type ChatMessage } from "../db/messages";
 
+// Get the origin URL, preferring BASE_URL env var for production
+function getOrigin(headers: Record<string, string | undefined>): string {
+  // If BASE_URL is set and not localhost, use it (production)
+  if (
+    process.env.BASE_URL &&
+    !process.env.BASE_URL.includes("localhost") &&
+    !process.env.BASE_URL.includes("127.0.0.1")
+  ) {
+    return process.env.BASE_URL;
+  }
+
+  // Otherwise derive from headers (development)
+  const host = headers["host"] || "127.0.0.1:3891";
+  const forwardedProto = headers["x-forwarded-proto"];
+  const protocol =
+    forwardedProto ||
+    (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
+  return `${protocol}://${host}`;
+}
+
 const app = new Elysia()
   .use(html())
   .use(cookie())
@@ -48,14 +68,7 @@ const app = new Elysia()
   // bluesky oauth client metadata endpoint
   // this is required for oauth to work - bluesky fetches this to verify your app
   .get("/oauth-client-metadata.json", ({ headers }) => {
-    // dynamically build the origin from request headers
-    // this allows the app to work locally, with ngrok, and in production
-    const host = headers["host"] || "127.0.0.1:3891";
-    const forwardedProto = headers["x-forwarded-proto"];
-    const protocol =
-      forwardedProto ||
-      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
-    const origin = `${protocol}://${host}`;
+    const origin = getOrigin(headers);
 
     return Response.json(
       {
@@ -175,14 +188,7 @@ const app = new Elysia()
   // main app page
   .get("/", ({ headers }) => {
     const timestamp = Date.now();
-
-    // dynamically build the origin for oauth config
-    const host = headers["host"] || "127.0.0.1:3891";
-    const forwardedProto = headers["x-forwarded-proto"];
-    const protocol =
-      forwardedProto ||
-      (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
-    const origin = `${protocol}://${host}`;
+    const origin = getOrigin(headers);
 
     return `
       <!DOCTYPE html>
