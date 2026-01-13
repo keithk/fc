@@ -192,6 +192,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
       let blueskyPostUri: string | undefined;
 
       if (postToBsky) {
+        console.log("[api] Cross-posting to Bluesky...");
         const bskyRecord: any = {
           $type: "app.bsky.feed.post",
           text: text + "\n\nvia keith's friend club: https://fc.keith.is",
@@ -242,8 +243,15 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
           const bskyData = await bskyResponse.json();
           blueskyPostUri = bskyData.uri;
           fcRecord.blueskyPostUri = blueskyPostUri;
+          console.log("[api] Cross-posted to Bluesky:", blueskyPostUri);
+        } else {
+          const errorText = await bskyResponse.text();
+          console.error(
+            "[api] Failed to cross-post to Bluesky:",
+            bskyResponse.status,
+            errorText,
+          );
         }
-        // If Bluesky post fails, we still continue with the FC post
       }
 
       // Create record in our custom lexicon
@@ -291,7 +299,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
     }
   })
 
-  // Delete a message from the user's PDS
+  // Delete a message from the user's PDS (and Bluesky if cross-posted)
   .delete("/message/:rkey", async ({ params, query }) => {
     const { rkey } = params;
     const sessionId = query.sessionId;
@@ -306,6 +314,51 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
     }
 
     try {
+      // First, fetch the record to check if it has a blueskyPostUri
+      const getResponse = await session.fetchHandler(
+        `/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(session.did)}&collection=${encodeURIComponent(FC_COLLECTION)}&rkey=${encodeURIComponent(rkey)}`,
+        { method: "GET" },
+      );
+
+      let blueskyPostUri: string | undefined;
+      if (getResponse.ok) {
+        const record = await getResponse.json();
+        blueskyPostUri = record.value?.blueskyPostUri;
+      }
+
+      // If there's a cross-posted Bluesky post, delete it first
+      if (blueskyPostUri) {
+        // Extract rkey from URI: at://did:plc:xxx/app.bsky.feed.post/rkey
+        const bskyRkey = blueskyPostUri.split("/").pop();
+        if (bskyRkey) {
+          console.log(
+            "[api] Deleting cross-posted Bluesky post:",
+            blueskyPostUri,
+          );
+          const bskyDeleteResponse = await session.fetchHandler(
+            "/xrpc/com.atproto.repo.deleteRecord",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                repo: session.did,
+                collection: "app.bsky.feed.post",
+                rkey: bskyRkey,
+              }),
+            },
+          );
+
+          if (!bskyDeleteResponse.ok) {
+            const error = await bskyDeleteResponse.text();
+            console.error("[api] Failed to delete Bluesky post:", error);
+            // Continue with FC deletion even if Bluesky deletion fails
+          } else {
+            console.log("[api] Bluesky post deleted successfully");
+          }
+        }
+      }
+
+      // Delete the FC message
       const response = await session.fetchHandler(
         "/xrpc/com.atproto.repo.deleteRecord",
         {

@@ -26,7 +26,7 @@ import {
 } from "./websocket";
 import { startJetstream, stopJetstream } from "./lib/jetstream";
 import { startCleanupJob, stopCleanupJob } from "./lib/expiration-cleanup";
-import { APP_CONFIG, OAUTH_CONFIG } from "../shared/config";
+import { APP_CONFIG, OAUTH_SCOPE_STRING_METADATA } from "../shared/config";
 import { messageService, type ChatMessage } from "../db/messages";
 
 const app = new Elysia()
@@ -68,7 +68,7 @@ const app = new Elysia()
         redirect_uris: [`${origin}/oauth/callback`],
         response_types: ["code"],
         grant_types: ["authorization_code", "refresh_token"],
-        scope: OAUTH_CONFIG.scopes,
+        scope: OAUTH_SCOPE_STRING_METADATA,
         token_endpoint_auth_method: "none",
         application_type: "web",
         dpop_bound_access_tokens: true,
@@ -199,7 +199,7 @@ const app = new Elysia()
           <h1>🐻 keith's friend club</h1>
 
           <div class="instructions">
-            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (part of the <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--teal);">atmosphere</a> - another experiment I made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime.</p>
+            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (this is an explainer on another experiment i made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime.</p>
           </div>
 
           <div class="chat-container">

@@ -2,7 +2,7 @@
 // ABOUTME: Uses server-side OAuth to post on behalf of users
 
 import { NodeOAuthClient } from "@atproto/oauth-client-node";
-import { OAUTH_SCOPE_STRING, APP_CONFIG } from "../../shared/config";
+import { OAUTH_SCOPE_STRING_METADATA, APP_CONFIG } from "../../shared/config";
 
 // in-memory stores for oauth state and sessions
 const stateStore = new Map();
@@ -19,7 +19,7 @@ export async function getOAuthClient(origin: string) {
         client_name: APP_CONFIG.appName,
         client_uri: origin,
         redirect_uris: [`${origin}/oauth/callback`],
-        scope: OAUTH_SCOPE_STRING,
+        scope: OAUTH_SCOPE_STRING_METADATA,
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",

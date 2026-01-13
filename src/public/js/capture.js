@@ -57,17 +57,18 @@ async function startRecording() {
   const ctx = canvas.getContext("2d");
 
   // Use smaller dimensions for faster upload
-  const videoWidth = 480;
-  const videoHeight = 360;
+  const videoWidth = 720;
+  const videoHeight = 540;
 
   canvas.width = videoWidth;
   canvas.height = videoHeight;
 
   // Create a MediaRecorder to capture video
-  const canvasStream = canvas.captureStream(15); // 15 fps for smaller file size
+  const canvasStream = canvas.captureStream(24); // 24 fps for smooth playback
 
   // Try to find the best supported codec
-  let options = { videoBitsPerSecond: 1000000 }; // 1 Mbps - good for 480p
+  // 2.5 Mbps @ 2 seconds = ~625KB, good balance of quality and size
+  let options = { videoBitsPerSecond: 2500000 };
 
   if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
     options.mimeType = "video/webm;codecs=vp9";
