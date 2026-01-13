@@ -12,7 +12,9 @@ const sessionStore = new Map();
 const oauthClients = new Map<string, NodeOAuthClient>();
 
 export async function getOAuthClient(origin: string) {
+  console.log(`[oauth-client] getOAuthClient called with origin: ${origin}`);
   if (!oauthClients.has(origin)) {
+    console.log(`[oauth-client] Creating new OAuth client for: ${origin}`);
     const client = new NodeOAuthClient({
       clientMetadata: {
         client_id: `${origin}/oauth-client-metadata.json`,

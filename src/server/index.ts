@@ -31,13 +31,17 @@ import { messageService, type ChatMessage } from "../db/messages";
 
 // Get the origin URL, preferring BASE_URL env var for production
 function getOrigin(headers: Record<string, string | undefined>): string {
+  const baseUrl = process.env.BASE_URL;
+  console.log(
+    `[index] getOrigin: BASE_URL=${baseUrl}, host=${headers["host"]}`,
+  );
   // If BASE_URL is set and not localhost, use it (production)
   if (
-    process.env.BASE_URL &&
-    !process.env.BASE_URL.includes("localhost") &&
-    !process.env.BASE_URL.includes("127.0.0.1")
+    baseUrl &&
+    !baseUrl.includes("localhost") &&
+    !baseUrl.includes("127.0.0.1")
   ) {
-    return process.env.BASE_URL;
+    return baseUrl;
   }
 
   // Otherwise derive from headers (development)
