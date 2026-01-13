@@ -25,7 +25,21 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   private ensureSchema(): void {
-    // Add new columns if they don't exist (migration-safe)
+    // Create table if it doesn't exist
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        user_handle TEXT,
+        text TEXT NOT NULL,
+        gif_data TEXT,
+        created_at INTEGER NOT NULL,
+        bluesky_post_uri TEXT,
+        expires_at INTEGER
+      )
+    `);
+
+    // Add new columns if they don't exist (migration-safe for older DBs)
     try {
       this.db.run(`ALTER TABLE messages ADD COLUMN bluesky_post_uri TEXT`);
     } catch {
