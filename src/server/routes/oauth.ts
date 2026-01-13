@@ -17,18 +17,19 @@ import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 
-// Get the origin URL, preferring BASE_URL env var for production
+// Get the origin URL for OAuth
 function getOrigin(headers: Record<string, string | undefined>): string {
-  // If BASE_URL is set and not localhost, use it (production)
+  // Check BASE_URL first (should be set in production)
+  const baseUrl = process.env.BASE_URL;
   if (
-    process.env.BASE_URL &&
-    !process.env.BASE_URL.includes("localhost") &&
-    !process.env.BASE_URL.includes("127.0.0.1")
+    baseUrl &&
+    !baseUrl.includes("localhost") &&
+    !baseUrl.includes("127.0.0.1")
   ) {
-    return process.env.BASE_URL;
+    return baseUrl;
   }
 
-  // Otherwise derive from headers (development)
+  // Derive from headers (development/ngrok)
   const host = headers["host"] || "127.0.0.1:3891";
   const forwardedProto = headers["x-forwarded-proto"];
   const protocol =

@@ -190,6 +190,25 @@ const app = new Elysia()
     const timestamp = Date.now();
     const origin = getOrigin(headers);
 
+    // Get most recent message with a video for OpenGraph
+    const recentMessages = messageService.getRecentMessages(10);
+    const latestWithVideo = recentMessages.find((m) => m.videoUrl);
+
+    // Build OpenGraph video tags if we have a recent video
+    let ogVideoTags = "";
+    if (latestWithVideo?.videoUrl) {
+      ogVideoTags = `
+        <meta property="og:video" content="${latestWithVideo.videoUrl}" />
+        <meta property="og:video:type" content="video/mp4" />
+        <meta property="og:video:width" content="720" />
+        <meta property="og:video:height" content="540" />
+        <meta name="twitter:card" content="player" />
+        <meta name="twitter:player" content="${latestWithVideo.videoUrl}" />
+        <meta name="twitter:player:width" content="720" />
+        <meta name="twitter:player:height" content="540" />
+      `;
+    }
+
     return `
       <!DOCTYPE html>
       <html lang="en">
@@ -197,6 +216,30 @@ const app = new Elysia()
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>keith's friend club 🐻</title>
+
+        <!-- SEO Meta Tags -->
+        <meta name="description" content="Record 2-second videos, share messages with friends on the ATmosphere. Messages live on your Personal Data Server." />
+        <meta name="keywords" content="bluesky, atproto, friend club, video chat, social" />
+        <meta name="author" content="keith" />
+
+        <!-- OpenGraph Tags -->
+        <meta property="og:title" content="keith's friend club 🐻" />
+        <meta property="og:description" content="Record 2-second videos, share messages with friends on the ATmosphere." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="${origin}" />
+        <meta property="og:image" content="${origin}/public/keith.png" />
+        <meta property="og:site_name" content="keith's friend club" />
+        ${ogVideoTags}
+
+        <!-- Twitter Card Tags -->
+        ${!latestWithVideo?.videoUrl ? '<meta name="twitter:card" content="summary" />' : ""}
+        <meta name="twitter:title" content="keith's friend club 🐻" />
+        <meta name="twitter:description" content="Record 2-second videos, share messages with friends on the ATmosphere." />
+        <meta name="twitter:image" content="${origin}/public/keith.png" />
+
+        <!-- Favicon -->
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👫</text></svg>" />
+
         <link rel="stylesheet" href="/public/css/main.css?v=${timestamp}" />
         <script src="/public/js/gif.js"></script>
       </head>
@@ -336,9 +379,13 @@ setServerInstance(app);
 // bun might choose a different port if 3891 is taken, so log the actual port
 const port = app.server?.port || PORT;
 console.log(`🐻 keith's friend club is running at http://127.0.0.1:${port}`);
-console.log(
-  `⚠️  important: use 127.0.0.1 (not localhost) for oauth to work properly`,
-);
+if (process.env.BASE_URL) {
+  console.log(`📍 BASE_URL: ${process.env.BASE_URL}`);
+} else {
+  console.log(
+    `⚠️  important: use 127.0.0.1 (not localhost) for oauth to work properly`,
+  );
+}
 
 // Resolve DID to handle for Jetstream events
 async function resolveHandle(did: string): Promise<string | undefined> {
