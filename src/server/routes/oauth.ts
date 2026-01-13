@@ -21,11 +21,15 @@ import { tmpdir } from "os";
 function getOrigin(headers: Record<string, string | undefined>): string {
   // Check BASE_URL first (should be set in production)
   const baseUrl = process.env.BASE_URL;
+  console.log(
+    `[oauth] getOrigin: BASE_URL=${baseUrl}, host=${headers["host"]}`,
+  );
   if (
     baseUrl &&
     !baseUrl.includes("localhost") &&
     !baseUrl.includes("127.0.0.1")
   ) {
+    console.log(`[oauth] Using BASE_URL: ${baseUrl}`);
     return baseUrl;
   }
 
@@ -35,7 +39,9 @@ function getOrigin(headers: Record<string, string | undefined>): string {
   const protocol =
     forwardedProto ||
     (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
-  return `${protocol}://${host}`;
+  const origin = `${protocol}://${host}`;
+  console.log(`[oauth] Using derived origin: ${origin}`);
+  return origin;
 }
 
 export const oauthRoutes = new Elysia({ prefix: "/oauth" })
