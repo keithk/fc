@@ -11,6 +11,7 @@
 import { Elysia } from "elysia";
 import { getOAuthClient, userSessionStore } from "../lib/oauth-client";
 import { setActiveSession, getActiveSession } from "../lib/sessions";
+import { OAUTH_SCOPE_STRING } from "../../shared/config";
 import { $ } from "bun";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
@@ -51,8 +52,7 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
 
       // create authorization url
       const authUrl = await client.authorize(did, {
-        scope:
-          "atproto repo:is.keith.fc.message app.bsky.feed.post com.atproto.repo.uploadBlob",
+        scope: OAUTH_SCOPE_STRING,
         state: crypto.randomUUID(),
       });
 

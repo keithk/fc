@@ -1,12 +1,8 @@
-/**
- * bluesky oauth client setup
- * uses server-side oauth to post on behalf of users
- *
- * note: stores are in-memory only (lost on restart)
- * for production with multiple servers, use redis or similar
- */
+// ABOUTME: Bluesky OAuth client setup
+// ABOUTME: Uses server-side OAuth to post on behalf of users
 
 import { NodeOAuthClient } from "@atproto/oauth-client-node";
+import { OAUTH_SCOPE_STRING, APP_CONFIG } from "../../shared/config";
 
 // in-memory stores for oauth state and sessions
 const stateStore = new Map();
@@ -20,11 +16,10 @@ export async function getOAuthClient(origin: string) {
     const client = new NodeOAuthClient({
       clientMetadata: {
         client_id: `${origin}/oauth-client-metadata.json`,
-        client_name: "keith's friend club",
+        client_name: APP_CONFIG.appName,
         client_uri: origin,
         redirect_uris: [`${origin}/oauth/callback`],
-        scope:
-          "atproto repo:is.keith.fc.message app.bsky.feed.post com.atproto.repo.uploadBlob",
+        scope: OAUTH_SCOPE_STRING,
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",

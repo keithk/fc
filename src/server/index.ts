@@ -199,7 +199,7 @@ const app = new Elysia()
           <h1>🐻 keith's friend club</h1>
 
           <div class="instructions">
-            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video of yourself, write a message, and share it here (and optionally on Bluesky too!).</p>
+            <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (part of the <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--teal);">atmosphere</a> - another experiment I made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime.</p>
           </div>
 
           <div class="chat-container">
@@ -258,6 +258,8 @@ const app = new Elysia()
                   <span id="char-count" class="char-count">0 / 255</span>
                   <select id="expires-in" class="expires-select" disabled>
                     <option value="">No expiration</option>
+                    <option value="1m">Expires in 1 min</option>
+                    <option value="5m">Expires in 5 min</option>
                     <option value="30m">Expires in 30 min</option>
                     <option value="1h">Expires in 1 hour</option>
                     <option value="24h">Expires in 24 hours</option>
@@ -284,11 +286,22 @@ const app = new Elysia()
                 <h2>Recent Messages</h2>
                 <div class="messages" id="messages-container"></div>
               </div>
+
+              <!-- Your Messages Section (shown when logged in) -->
+              <div id="your-messages-section" class="messages-section" style="display: none; margin-top: 2rem;">
+                <h2>Your Messages</h2>
+                <p class="your-messages-hint">Messages stored on your PDS. Click 🗑️ to delete.</p>
+                <div class="messages" id="your-messages-container">
+                  <p class="loading-your-messages">Loading your messages...</p>
+                </div>
+              </div>
             </div>
           </div>
 
           <footer style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid black; text-align: center;">
             <a href="/privacy" style="color: var(--teal); font-weight: 700; text-decoration: none;">Privacy Policy</a>
+            <span style="margin: 0 1rem;">•</span>
+            <a id="pdsls-link" href="https://pdsls.dev/" target="_blank" style="color: var(--teal); font-weight: 700; text-decoration: none; display: none;">View your data on pdsls.dev</a>
           </footer>
         </main>
 

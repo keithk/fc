@@ -40,6 +40,12 @@ function showLoginForm() {
   if (loginForm) loginForm.style.display = "flex";
   if (userInfo) userInfo.style.display = "none";
 
+  // Hide "Your Messages" section and pdsls link
+  const yourMessagesSection = document.getElementById("your-messages-section");
+  if (yourMessagesSection) yourMessagesSection.style.display = "none";
+  const pdslsLink = document.getElementById("pdsls-link");
+  if (pdslsLink) pdslsLink.style.display = "none";
+
   // disable camera and message sections
   disableInteractions();
 }
@@ -54,6 +60,18 @@ function showUserInfo(handle) {
 
   // enable camera and message sections
   enableInteractions();
+
+  // Show "Your Messages" section and load posts
+  const yourMessagesSection = document.getElementById("your-messages-section");
+  if (yourMessagesSection) yourMessagesSection.style.display = "block";
+  loadYourMessages();
+
+  // Show pdsls.dev link with user's DID
+  const pdslsLink = document.getElementById("pdsls-link");
+  if (pdslsLink && currentSession?.did) {
+    pdslsLink.href = `https://pdsls.dev/at://${currentSession.did}`;
+    pdslsLink.style.display = "inline";
+  }
 }
 
 function disableInteractions() {
@@ -170,6 +188,122 @@ window.postMessage = async function (text, gifDataUrl, options = {}) {
 
 // Keep the old function name for backward compatibility
 window.postToBluesky = window.postMessage;
+
+// Load user's messages from their PDS
+async function loadYourMessages() {
+  if (!currentSession?.sessionId) return;
+
+  const container = document.getElementById("your-messages-container");
+  if (!container) return;
+
+  container.innerHTML =
+    '<p class="loading-your-messages">Loading your messages...</p>';
+
+  try {
+    const response = await fetch(
+      `/api/my-posts?sessionId=${encodeURIComponent(currentSession.sessionId)}`,
+    );
+    const result = await response.json();
+
+    if (result.error) {
+      container.innerHTML = `<p class="loading-your-messages">Error: ${result.error}</p>`;
+      return;
+    }
+
+    if (!result.posts || result.posts.length === 0) {
+      container.innerHTML =
+        '<p class="loading-your-messages">No messages yet. Post something!</p>';
+      return;
+    }
+
+    container.innerHTML = "";
+    for (const post of result.posts) {
+      const messageEl = document.createElement("div");
+      messageEl.className = "message";
+      messageEl.setAttribute("data-rkey", post.rkey);
+
+      const expiresInfo = post.expiresAt
+        ? `<span class="expires-info" title="Expires ${new Date(post.expiresAt).toLocaleString()}">⏰</span>`
+        : "";
+
+      const bskyLink = post.blueskyPostUri
+        ? `<a href="https://bsky.app/profile/${currentSession.handle}/post/${post.blueskyPostUri.split("/").pop()}" target="_blank" class="bsky-link" title="View on Bluesky">🦋</a>`
+        : "";
+
+      messageEl.innerHTML = `
+        <div class="message-content">
+          <div class="message-text">${escapeHtml(post.text)}</div>
+          <div class="message-meta">
+            <span class="message-time">${new Date(post.createdAt).toLocaleString()}</span>
+            ${expiresInfo}
+            ${bskyLink}
+            <button class="delete-btn" onclick="deleteYourMessage('${post.rkey}')" title="Delete message">🗑️</button>
+          </div>
+        </div>
+      `;
+      container.appendChild(messageEl);
+    }
+  } catch (error) {
+    console.error("Error loading your messages:", error);
+    container.innerHTML =
+      '<p class="loading-your-messages">Failed to load messages.</p>';
+  }
+}
+
+// Delete a message from user's PDS
+window.deleteYourMessage = async function (rkey) {
+  if (!currentSession?.sessionId) return;
+
+  if (!confirm("Delete this message? This will remove it from your PDS.")) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/message/${rkey}?sessionId=${encodeURIComponent(currentSession.sessionId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    const result = await response.json();
+
+    if (result.success) {
+      // Remove from "Your Messages" section
+      const yourContainer = document.getElementById("your-messages-container");
+      const yourMessageEl = yourContainer?.querySelector(
+        `[data-rkey="${rkey}"]`,
+      );
+      if (yourMessageEl) yourMessageEl.remove();
+
+      // Also remove from "Recent Messages" if present
+      const recentContainer = document.getElementById("messages-container");
+      const recentMessageEl = recentContainer?.querySelector(
+        `[data-message-id="${rkey}"]`,
+      );
+      if (recentMessageEl) recentMessageEl.remove();
+
+      console.log("Message deleted:", rkey);
+    } else {
+      alert("Failed to delete: " + result.error);
+    }
+  } catch (error) {
+    console.error("Error deleting message:", error);
+    alert("Failed to delete message.");
+  }
+};
+
+// Helper to escape HTML
+function escapeHtml(text) {
+  const map = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+    "/": "&#x2F;",
+  };
+  return text.replace(/[&<>"'/]/g, (char) => map[char]);
+}
 
 // Set up event listeners
 document.addEventListener("DOMContentLoaded", () => {

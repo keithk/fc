@@ -5,15 +5,16 @@ import { Elysia } from "elysia";
 import { userSessionStore } from "../lib/oauth-client";
 import { getActiveSession } from "../lib/sessions";
 import { messageService } from "../../db/messages";
+import { FC_COLLECTION } from "../../shared/config";
 import { $ } from "bun";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const FC_COLLECTION = "is.keith.fc.message";
-
 // Expiration options in milliseconds
 const EXPIRATION_OPTIONS = {
+  "1m": 1 * 60 * 1000,
+  "5m": 5 * 60 * 1000,
   "30m": 30 * 60 * 1000,
   "1h": 60 * 60 * 1000,
   "24h": 24 * 60 * 60 * 1000,
@@ -106,7 +107,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
 
           try {
             await writeFile(tmpInputPath, bytes);
-            await $`ffmpeg -i ${tmpInputPath} -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -movflags +faststart ${tmpOutputPath}`.quiet();
+            await $`ffmpeg -i ${tmpInputPath} -c:v libx264 -preset fast -crf 28 -an -movflags +faststart ${tmpOutputPath}`.quiet();
 
             const mp4File = Bun.file(tmpOutputPath);
             videoBytes = new Uint8Array(await mp4File.arrayBuffer());
@@ -124,20 +125,47 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
         }
 
         // Upload blob to user's PDS
-        const uploadResponse = await session.fetchHandler(
-          "/xrpc/com.atproto.repo.uploadBlob",
-          {
-            method: "POST",
-            headers: { "Content-Type": videoMimeType },
-            body: videoBytes,
-          },
+        console.log(
+          `[api] Uploading video blob (${videoBytes.length} bytes, ${videoMimeType}) to PDS...`,
         );
+        const uploadStart = Date.now();
+        let uploadResponse;
+        try {
+          uploadResponse = await session.fetchHandler(
+            "/xrpc/com.atproto.repo.uploadBlob",
+            {
+              method: "POST",
+              headers: { "Content-Type": videoMimeType },
+              body: videoBytes,
+            },
+          );
+          console.log(
+            `[api] Upload completed in ${Date.now() - uploadStart}ms, status: ${uploadResponse.status}`,
+          );
+        } catch (uploadError: any) {
+          console.error(
+            `[api] Upload fetch error after ${Date.now() - uploadStart}ms:`,
+            uploadError,
+          );
+          return {
+            success: false,
+            error: `Upload failed: ${uploadError.message}`,
+          };
+        }
 
         if (!uploadResponse.ok) {
-          return { success: false, error: "Failed to upload video" };
+          const errorText = await uploadResponse.text();
+          console.error(
+            `[api] Failed to upload video: ${uploadResponse.status} ${errorText}`,
+          );
+          return {
+            success: false,
+            error: `Failed to upload video: ${errorText}`,
+          };
         }
 
         const uploadData = await uploadResponse.json();
+        console.log(`[api] Video uploaded successfully:`, uploadData.blob);
         videoBlob = uploadData.blob;
       }
 

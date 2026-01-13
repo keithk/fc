@@ -12,8 +12,8 @@ async function initCamera() {
 
     mediaStream = await navigator.mediaDevices.getUserMedia({
       video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+        width: { ideal: 640 },
+        height: { ideal: 480 },
       },
       audio: false,
     });
@@ -56,18 +56,18 @@ async function startRecording() {
   const canvas = document.getElementById("gif-canvas");
   const ctx = canvas.getContext("2d");
 
-  // Get actual video dimensions to maintain aspect ratio
-  const videoWidth = video.videoWidth || 1280;
-  const videoHeight = video.videoHeight || 720;
+  // Use smaller dimensions for faster upload
+  const videoWidth = 480;
+  const videoHeight = 360;
 
   canvas.width = videoWidth;
   canvas.height = videoHeight;
 
   // Create a MediaRecorder to capture video
-  const canvasStream = canvas.captureStream(30); // 30 fps
+  const canvasStream = canvas.captureStream(15); // 15 fps for smaller file size
 
   // Try to find the best supported codec
-  let options = { videoBitsPerSecond: 5000000 }; // 5 Mbps for high quality
+  let options = { videoBitsPerSecond: 1000000 }; // 1 Mbps - good for 480p
 
   if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
     options.mimeType = "video/webm;codecs=vp9";

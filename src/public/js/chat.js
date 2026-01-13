@@ -82,8 +82,12 @@ function displayMessage(message, skipPrepend = false) {
   // Determine if this is a video or image
   let mediaHtml = "";
   if (message.gif) {
-    // Check if it's a video (data URL starts with data:video/)
-    if (message.gif.startsWith("data:video/")) {
+    // Check if it's a video (data URL or blob URL from PDS)
+    const isVideo =
+      message.gif.startsWith("data:video/") ||
+      message.gif.includes("sync.getBlob") ||
+      message.gif.includes("video/mp4");
+    if (isVideo) {
       mediaHtml = `<video src="${message.gif}" class="message-gif" autoplay loop muted playsinline></video>`;
     } else {
       mediaHtml = `<img src="${message.gif}" class="message-gif" alt="User GIF">`;
@@ -99,6 +103,12 @@ function displayMessage(message, skipPrepend = false) {
     bskyLink = `<a href="${bskyUrl}" target="_blank" class="bsky-link" title="View on Bluesky">🦋</a>`;
   }
 
+  // Show delete button if this is the current user's message
+  let deleteBtn = "";
+  if (window.userId && message.userId === window.userId) {
+    deleteBtn = `<button class="delete-btn" onclick="deleteYourMessage('${message.id}')" title="Delete message">🗑️</button>`;
+  }
+
   const html = `
     ${mediaHtml}
     <div class="message-content">
@@ -107,6 +117,7 @@ function displayMessage(message, skipPrepend = false) {
         ${handleLink}
         <span class="message-time">${formatTime(message.timestamp || Date.now())}</span>
         ${bskyLink}
+        ${deleteBtn}
       </div>
     </div>
   `;

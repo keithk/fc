@@ -3,8 +3,7 @@
 
 import { messageService } from "../../db/messages";
 import { getAllActiveSessions } from "./sessions";
-
-const FC_COLLECTION = "is.keith.fc.message";
+import { FC_COLLECTION } from "../../shared/config";
 const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -30,7 +29,9 @@ async function cleanupExpiredMessages(): Promise<void> {
     }
 
     if (!userSession) {
-      console.log(`[cleanup] No active session for ${message.userId}, skipping ${message.id}`);
+      console.log(
+        `[cleanup] No active session for ${message.userId}, skipping ${message.id}`,
+      );
       continue;
     }
 
@@ -46,11 +47,13 @@ async function cleanupExpiredMessages(): Promise<void> {
             collection: FC_COLLECTION,
             rkey: message.id,
           }),
-        }
+        },
       );
 
       if (response.ok) {
-        console.log(`[cleanup] Deleted expired message ${message.id} from ${message.userId}`);
+        console.log(
+          `[cleanup] Deleted expired message ${message.id} from ${message.userId}`,
+        );
         // Remove from local cache
         messageService.deleteMessage(message.id);
       } else {
@@ -89,7 +92,7 @@ export async function cleanupUserExpiredMessages(session: any): Promise<void> {
     // List user's records
     const response = await session.fetchHandler(
       `/xrpc/com.atproto.repo.listRecords?repo=${encodeURIComponent(session.did)}&collection=${encodeURIComponent(FC_COLLECTION)}&limit=100`,
-      { method: "GET" }
+      { method: "GET" },
     );
 
     if (!response.ok) {
@@ -104,22 +107,22 @@ export async function cleanupUserExpiredMessages(session: any): Promise<void> {
         const rkey = record.uri.split("/").pop();
 
         try {
-          await session.fetchHandler(
-            "/xrpc/com.atproto.repo.deleteRecord",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                repo: session.did,
-                collection: FC_COLLECTION,
-                rkey,
-              }),
-            }
-          );
+          await session.fetchHandler("/xrpc/com.atproto.repo.deleteRecord", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repo: session.did,
+              collection: FC_COLLECTION,
+              rkey,
+            }),
+          });
           console.log(`[cleanup] Deleted user's expired message ${rkey}`);
           messageService.deleteMessage(rkey);
         } catch (error) {
-          console.error(`[cleanup] Failed to delete user message ${rkey}:`, error);
+          console.error(
+            `[cleanup] Failed to delete user message ${rkey}:`,
+            error,
+          );
         }
       }
     }

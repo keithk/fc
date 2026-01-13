@@ -2,9 +2,9 @@
 // ABOUTME: Subscribes to is.keith.fc.message records and broadcasts to chat
 
 import type { ChatMessage } from "../../db/adapters/base";
+import { FC_COLLECTION } from "../../shared/config";
 
 const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe";
-const COLLECTION = "is.keith.fc.message";
 
 export interface FcMessageRecord {
   text: string;
@@ -30,14 +30,18 @@ interface JetstreamCommitEvent {
 
 type JetstreamEvent = JetstreamCommitEvent | { kind: "identity" | "account" };
 
-type MessageHandler = (message: ChatMessage, operation: "create" | "delete") => void;
+type MessageHandler = (
+  message: ChatMessage,
+  operation: "create" | "delete",
+) => void;
 
 let ws: WebSocket | null = null;
 let reconnectAttempts = 0;
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let isShuttingDown = false;
 let messageHandler: MessageHandler | null = null;
-let handleResolver: ((did: string) => Promise<string | undefined>) | null = null;
+let handleResolver: ((did: string) => Promise<string | undefined>) | null =
+  null;
 
 function getReconnectDelay(): number {
   const baseDelay = 1000;
@@ -49,14 +53,17 @@ async function processEvent(event: JetstreamCommitEvent): Promise<void> {
   const { did, commit } = event;
   const { operation, collection, rkey, record } = commit;
 
-  if (collection !== COLLECTION) return;
+  if (collection !== FC_COLLECTION) return;
 
   const uri = `at://${did}/${collection}/${rkey}`;
 
   try {
     if (operation === "delete") {
       if (messageHandler) {
-        messageHandler({ id: rkey, text: "", userId: did, timestamp: 0 }, "delete");
+        messageHandler(
+          { id: rkey, text: "", userId: did, timestamp: 0 },
+          "delete",
+        );
       }
       console.log(`[jetstream] Deleted message: ${uri}`);
     } else if (operation === "create" || operation === "update") {
@@ -70,18 +77,45 @@ async function processEvent(event: JetstreamCommitEvent): Promise<void> {
 
       const handle = handleResolver ? await handleResolver(did) : undefined;
 
+      // Build video URL if there's a video blob
+      let videoUrl: string | undefined;
+      if (record.video?.ref?.$link) {
+        // Resolve user's PDS from their DID document
+        try {
+          const didDocResponse = await fetch(`https://plc.directory/${did}`);
+          if (didDocResponse.ok) {
+            const didDoc = await didDocResponse.json();
+            // Find the PDS service endpoint
+            const pdsService = didDoc.service?.find(
+              (s: any) =>
+                s.id === "#atproto_pds" ||
+                s.type === "AtprotoPersonalDataServer",
+            );
+            if (pdsService?.serviceEndpoint) {
+              videoUrl = `${pdsService.serviceEndpoint}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(record.video.ref.$link)}`;
+            }
+          }
+        } catch (err) {
+          console.error(`[jetstream] Failed to resolve PDS for ${did}:`, err);
+        }
+      }
+
       const message: ChatMessage = {
         id: rkey,
         text: record.text,
         userId: did,
         userHandle: handle,
         timestamp: new Date(record.createdAt).getTime(),
+        gif: videoUrl,
+        blueskyPostUri: record.blueskyPostUri,
       };
 
       if (messageHandler) {
         messageHandler(message, "create");
       }
-      console.log(`[jetstream] New message from ${handle || did}: ${record.text.substring(0, 50)}...`);
+      console.log(
+        `[jetstream] New message from ${handle || did}: ${record.text.substring(0, 50)}${videoUrl ? " (with video)" : ""}`,
+      );
     }
   } catch (error) {
     console.error(`[jetstream] Error processing event:`, error);
@@ -92,7 +126,7 @@ function connect(): void {
   if (isShuttingDown) return;
 
   const params = new URLSearchParams();
-  params.append("wantedCollections", COLLECTION);
+  params.append("wantedCollections", FC_COLLECTION);
 
   const url = `${JETSTREAM_URL}?${params}`;
   console.log(`[jetstream] Connecting to ${url}`);
@@ -136,7 +170,9 @@ function scheduleReconnect(): void {
 
   const delay = getReconnectDelay();
   reconnectAttempts++;
-  console.log(`[jetstream] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+  console.log(
+    `[jetstream] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`,
+  );
 
   reconnectTimeout = setTimeout(() => {
     connect();
@@ -149,7 +185,9 @@ export interface JetstreamOptions {
 }
 
 export function startJetstream(options: JetstreamOptions): void {
-  console.log("[jetstream] Starting Jetstream consumer for is.keith.fc.message");
+  console.log(
+    "[jetstream] Starting Jetstream consumer for is.keith.fc.message",
+  );
   messageHandler = options.onMessage;
   handleResolver = options.resolveHandle;
   isShuttingDown = false;
