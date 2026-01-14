@@ -100,7 +100,7 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
         let videoBytes = bytes;
         let videoMimeType = mimeType;
 
-        // Convert webm to mp4 if needed
+        // Convert webm to mp4 if needed (ffmpeg must be installed)
         if (mimeType === "video/webm") {
           const tmpInputPath = join(tmpdir(), `fc-input-${Date.now()}.webm`);
           const tmpOutputPath = join(tmpdir(), `fc-output-${Date.now()}.mp4`);
@@ -116,11 +116,15 @@ export const apiRoutes = new Elysia({ prefix: "/api" })
             await unlink(tmpInputPath);
             await unlink(tmpOutputPath);
           } catch (error) {
+            console.warn(
+              "[api] ffmpeg conversion failed, using webm directly:",
+              error,
+            );
             try {
               await unlink(tmpInputPath);
               await unlink(tmpOutputPath);
             } catch {}
-            return { success: false, error: "Failed to convert video to MP4" };
+            // Fall back to webm - some PDS servers may accept it
           }
         }
 
