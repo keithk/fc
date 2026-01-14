@@ -255,6 +255,7 @@ const app = new Elysia()
 
           <div class="instructions">
             <p><strong>How it works:</strong> Log in with Bluesky, record a 2-second video, write a message, and share it! Messages are stored on your <a href="https://linkring.lol/atmosphere" target="_blank" style="color: var(--pink);">Personal Data Server</a> (this is an explainer on another experiment i made). You can optionally cross-post to Bluesky, set messages to auto-delete, or delete them yourself anytime!</p>
+            <p>This might remind of you an old website, <strong><a href='https://en.wikipedia.org/wiki/Meatspace_Chat' target='_blank'>meat space</a></strong>, which is really the same idea! I love meat space, make the internet more meat space!</p>
           </div>
 
           <div class="chat-container">
