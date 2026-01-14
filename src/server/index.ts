@@ -145,42 +145,44 @@ const app = new Elysia()
               <div style="position: absolute; left: -12px; top: 40px; width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-right: 12px solid black;"></div>
               <div style="position: absolute; left: -10px; top: 40px; width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-right: 12px solid white;"></div>
               <p style="margin: 0; font-size: 1.1rem; line-height: 1.6;">
-                hey! i'm <a href="https://keith.is" target="_blank" style="color: var(--pink); font-weight: 700; text-decoration: none;">keith</a> and i made this little club for fun. i keep the last 20 messages in a database so they don't disappear when the server restarts, but that's it. no tracking. just storage for 20 messages and 2 second videos.
+                hey! i'm <a href="https://keith.is" target="_blank" style="color: var(--pink); font-weight: 700; text-decoration: none;">keith</a> and i made this little club for fun. <strong>your data lives on your own Personal Data Server (PDS), not on my server.</strong> i just cache recent messages so the feed loads fast. you own your data and can delete it anytime.
               </p>
             </div>
           </div>
 
           <!-- Official Privacy Details -->
           <div style="padding: 2rem; background: #f5f5f5; border: 2px solid black; line-height: 1.8;">
-            <h3 style="margin-top: 0;">What I Store</h3>
+            <h3 style="margin-top: 0;">Where Your Data Lives</h3>
 
-            <p><strong>Chat Messages:</strong> I store your last 20 chat messages in a local SQLite database. This includes:</p>
+            <p><strong>Your PDS (Primary Storage):</strong> When you post a message, it's written to your Personal Data Server using the <code>is.keith.fc.message</code> lexicon. This includes:</p>
             <ul style="margin-left: 2rem;">
-              <li>Your Bluesky handle</li>
               <li>Your message text</li>
-              <li>Your 2-second video (as a data URL)</li>
-              <li>Message timestamp</li>
+              <li>Your 2-second video (as a blob on your PDS)</li>
+              <li>Timestamp and expiration (if set)</li>
+              <li>Link to Bluesky post (if you cross-posted)</li>
             </ul>
 
-            <p><strong>Automatic Deletion:</strong> Messages are automatically deleted once I have more than 20 messages in the database. I only keep the 20 most recent messages.</p>
+            <p><strong>My Server (Cache Only):</strong> I keep a temporary cache of recent messages in SQLite so the feed loads quickly. This is just a cache - your PDS is the source of truth. If my server restarts, it repopulates from the network.</p>
 
-            <p><strong>Download Your Data:</strong> You can download all stored messages at any time: <a href="/api/messages/export" style="color: var(--pink); font-weight: 700;">Download Messages JSON</a></p>
+            <h3>You Control Your Data</h3>
 
-            <h3>Videos and Bluesky</h3>
+            <p><strong>Delete Anytime:</strong> Use the 🗑️ button on any of your messages to delete it from your PDS. This removes it permanently.</p>
 
-            <p><strong>Local Videos:</strong> The 2-second videos you record are converted to video format and stored as data URLs in my database. They are deleted along with messages as described above.</p>
+            <p><strong>Auto-Expiration:</strong> Set messages to auto-delete after 1 minute, 5 minutes, 30 minutes, 1 hour, or 24 hours. The server will delete expired messages from your PDS when you're logged in.</p>
 
-            <p><strong>When You Post to Bluesky:</strong> If you check the "Post to Bluesky" option, your video is uploaded to your Personal Data Server (PDS) as a blob and attached to your post. These blobs are stored on <em>your</em> PDS, not on my servers.</p>
+            <p><strong>View Your Data:</strong> You can see exactly what's stored on your PDS using <a href="https://pdsls.dev/" target="_blank" style="color: var(--teal); font-weight: 700;">pdsls.dev</a>. Look for records under <code>is.keith.fc.message</code> in your repository.</p>
 
-            <p>You can explore what's stored on your PDS using <a href="https://pdsls.dev/" target="_blank" style="color: var(--teal); font-weight: 700;">pdsls.dev</a> - just enter your Bluesky handle to see all blobs and data stored on your Personal Data Server. You can see the account I used for testing <a href="https://pdsls.dev/at://did:plc:34cz7auqhzl2rq62fg6mobut#blobs" target="_blank" style="color: var(--teal); font-weight: 700;">here</a> (isn't that cool??)</p>
+            <h3>Cross-Posting to Bluesky</h3>
+
+            <p>If you check "Also post to Bluesky", your message is <em>also</em> posted to <code>app.bsky.feed.post</code>. This creates a regular Bluesky post that appears in your feed. Deleting from Friend Club will also delete the Bluesky post.</p>
 
             <h3>What I Don't Do</h3>
 
             <ul style="margin-left: 2rem;">
+              <li>I don't store your data long-term - your PDS does</li>
               <li>I don't use analytics or tracking</li>
               <li>I don't sell or share your data</li>
-              <li>I don't store IP addresses or personal information beyond what's shown in the chat</li>
-              <li>I don't have access to your Bluesky password (I use OAuth)</li>
+              <li>I don't have access to your Bluesky password (OAuth only)</li>
             </ul>
 
             <p style="margin-top: 2rem; margin-bottom: 0;"><a href="/" style="color: var(--pink); font-weight: 700;">← Back to Friend Club</a></p>
