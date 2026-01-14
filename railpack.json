@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.railpack.com",
   "deploy": {
-    "startCommand": "bun run start"
-  },
-  "packages": ["ffmpeg"]
+    "startCommand": "bun run start",
+    "aptPackages": ["ffmpeg"]
+  }
 }
