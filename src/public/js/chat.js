@@ -7,35 +7,25 @@ function connectWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-  ws.onopen = () => {
-    console.log("Connected to Face Chat");
-  };
+  ws.onopen = () => {};
 
   ws.onmessage = (event) => {
-    console.log("WebSocket message received:", event.data);
     const data = JSON.parse(event.data);
-    console.log("Parsed message type:", data.type);
 
     if (data.type === "connected") {
-      console.log("Connected, displaying messages:", data.messages);
       displayMessages(data.messages);
     } else if (data.type === "new_message") {
-      console.log("New message received:", data.message);
       displayMessage(data.message);
     } else if (data.type === "delete_message") {
-      console.log("Message deleted:", data.messageId);
       removeMessage(data.messageId);
     }
   };
 
   ws.onclose = () => {
-    console.log("Disconnected from Face Chat");
     setTimeout(connectWebSocket, 3000);
   };
 
-  ws.onerror = (error) => {
-    console.error("WebSocket error:", error);
-  };
+  ws.onerror = () => {};
 }
 
 function displayMessages(messages) {
@@ -55,18 +45,12 @@ function removeMessage(messageId) {
   const messageEl = container.querySelector(`[data-message-id="${messageId}"]`);
   if (messageEl) {
     messageEl.remove();
-    console.log("Removed message from UI:", messageId);
   }
 }
 
 function displayMessage(message, skipPrepend = false) {
   const container = document.getElementById("messages-container");
-  if (!container) {
-    console.error("Messages container not found!");
-    return;
-  }
-
-  console.log("Displaying message:", message);
+  if (!container) return;
 
   const messageEl = document.createElement("div");
   messageEl.className = "message";
@@ -109,10 +93,19 @@ function displayMessage(message, skipPrepend = false) {
     deleteBtn = `<button class="delete-btn" onclick="deleteYourMessage('${message.id}')" title="Delete message">🗑️</button>`;
   }
 
+  // Show expiration info if message expires
+  let expiresHtml = "";
+  if (message.expiresAt) {
+    const expiresDate = new Date(message.expiresAt);
+    const timeLeft = formatTimeLeft(expiresDate);
+    expiresHtml = `<div class="message-expires">expires ${timeLeft}</div>`;
+  }
+
   const html = `
     ${mediaHtml}
     <div class="message-content">
       <div class="message-text">${escapeHtml(message.text)}</div>
+      ${expiresHtml}
       <div class="message-meta">
         ${handleLink}
         <span class="message-time">${formatTime(message.timestamp || Date.now())}</span>
@@ -134,8 +127,6 @@ function displayMessage(message, skipPrepend = false) {
   while (container.children.length > 20) {
     container.removeChild(container.lastChild);
   }
-
-  console.log("Message added to container");
 }
 
 function escapeHtml(text) {
@@ -158,9 +149,23 @@ function formatTime(timestamp) {
   });
 }
 
+function formatTimeLeft(expiresDate) {
+  const now = new Date();
+  const diff = expiresDate - now;
+
+  if (diff <= 0) return "soon";
+
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `in ${hours}h ${minutes % 60}m`;
+  }
+  return `in ${minutes}m`;
+}
+
 async function sendMessage(text, gifDataUrl) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.error("WebSocket not connected");
     return false;
   }
 
@@ -172,17 +177,10 @@ async function sendMessage(text, gifDataUrl) {
     userHandle: window.userHandle || null,
   };
 
-  console.log("Sending message:", { text, hasGif: !!gifDataUrl });
-  console.log("WebSocket state:", ws.readyState, "OPEN=", WebSocket.OPEN);
-
   try {
-    const messageString = JSON.stringify(message);
-    console.log("Sending to WebSocket, message length:", messageString.length);
-    ws.send(messageString);
-    console.log("Message sent to WebSocket successfully");
+    ws.send(JSON.stringify(message));
     return true;
   } catch (error) {
-    console.error("Failed to send message:", error);
     return false;
   }
 }

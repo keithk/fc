@@ -164,11 +164,10 @@ window.postMessage = async function (text, gifDataUrl, options = {}) {
     const result = await response.json();
 
     if (result.success) {
-      console.log("Posted message successfully!", result);
+      // Refresh "Your Messages" section
+      loadYourMessages();
       return result;
     } else {
-      console.error("Failed to post:", result.error);
-
       // If session expired, log out
       if (
         result.error?.includes("session") ||
@@ -222,8 +221,8 @@ async function loadYourMessages() {
       messageEl.className = "message";
       messageEl.setAttribute("data-rkey", post.rkey);
 
-      const expiresInfo = post.expiresAt
-        ? `<span class="expires-info" title="Expires ${new Date(post.expiresAt).toLocaleString()}">⏰</span>`
+      const expiresHtml = post.expiresAt
+        ? `<div class="message-expires">expires ${formatTimeLeft(new Date(post.expiresAt))}</div>`
         : "";
 
       const bskyLink = post.blueskyPostUri
@@ -233,9 +232,9 @@ async function loadYourMessages() {
       messageEl.innerHTML = `
         <div class="message-content">
           <div class="message-text">${escapeHtml(post.text)}</div>
+          ${expiresHtml}
           <div class="message-meta">
             <span class="message-time">${new Date(post.createdAt).toLocaleString()}</span>
-            ${expiresInfo}
             ${bskyLink}
             <button class="delete-btn" onclick="deleteYourMessage('${post.rkey}')" title="Delete message">🗑️</button>
           </div>
@@ -303,6 +302,22 @@ function escapeHtml(text) {
     "/": "&#x2F;",
   };
   return text.replace(/[&<>"'/]/g, (char) => map[char]);
+}
+
+// Helper to format time remaining until expiration
+function formatTimeLeft(expiresDate) {
+  const now = new Date();
+  const diff = expiresDate - now;
+
+  if (diff <= 0) return "soon";
+
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `in ${hours}h ${minutes % 60}m`;
+  }
+  return `in ${minutes}m`;
 }
 
 // Set up event listeners
