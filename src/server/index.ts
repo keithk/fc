@@ -12,7 +12,6 @@
 import { Elysia } from "elysia";
 import { staticPlugin } from "@elysiajs/static";
 import { html } from "@elysiajs/html";
-import { cookie } from "@elysiajs/cookie";
 import { chatRoutes } from "./routes/chat";
 import { authRoutes } from "./routes/auth";
 import { historyRoutes } from "./routes/history";
@@ -56,8 +55,10 @@ function getOrigin(headers: Record<string, string | undefined>): string {
 const app = new Elysia()
   // Health check endpoint for container orchestration
   .get("/health", () => ({ status: "ok" }))
+  .onError(({ code, error, path }) => {
+    console.error(`[error] ${code} on ${path}:`, error);
+  })
   .use(html())
-  .use(cookie())
   .use(
     staticPlugin({
       assets: "src/public",

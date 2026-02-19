@@ -45,7 +45,7 @@ function getOrigin(headers: Record<string, string | undefined>): string {
 }
 
 export const oauthRoutes = new Elysia({ prefix: "/oauth" })
-  .get("/login", async ({ query, headers, set }) => {
+  .get("/login", async ({ query, headers, set, cookie }) => {
     const handle = query.handle;
     if (!handle) {
       return new Response("Missing handle", { status: 400 });
@@ -89,16 +89,14 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
       const sessionId = crypto.randomUUID();
       userSessionStore.set(sessionId, { handle: handleToResolve, did });
 
-      // set session cookie
-      set.cookie = {
-        sid: {
-          value: sessionId,
-          httpOnly: true,
-          sameSite: "lax",
-          maxAge: 600,
-          path: "/",
-        },
-      };
+      // set session cookie (Elysia 1.4 built-in cookie API)
+      cookie.sid.set({
+        value: sessionId,
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: 600,
+        path: "/",
+      });
 
       // redirect to bluesky oauth
       console.log(`[oauth] Redirecting to: ${authUrl.toString()}`);
@@ -135,8 +133,8 @@ export const oauthRoutes = new Elysia({ prefix: "/oauth" })
     try {
       const client = await getOAuthClient(origin);
 
-      // get session from cookie
-      const sessionId = cookie?.sid;
+      // get session from cookie (Elysia 1.4 built-in cookie API)
+      const sessionId = cookie.sid?.value;
       const sessionData = sessionId ? userSessionStore.get(sessionId) : null;
 
       // exchange authorization code for access token
