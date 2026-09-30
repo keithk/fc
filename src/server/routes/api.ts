@@ -1,15 +1,15 @@
 // ABOUTME: API routes for friend club messages
 // ABOUTME: Handles posting to lexicon, fetching posts, and deletion
 
-import { Elysia } from "elysia";
-import { userSessionStore } from "../lib/oauth-client";
-import { getActiveSession } from "../lib/sessions";
-import { messageService } from "../../db/messages";
-import { FC_COLLECTION } from "../../shared/config";
-import { $ } from "bun";
-import { writeFile, unlink } from "fs/promises";
-import { join } from "path";
-import { tmpdir } from "os";
+import { Elysia, t } from "elysia";
+import { Client, getBlobCidString, l } from "@atproto/lex";
+import { messageService } from "../../db/messages.ts";
+import { getOrigin } from "../../shared/config.ts";
+import { restoreSession, SESSION_COOKIE } from "../lib/sessions.ts";
+import { blobUrl, resolveIdentity } from "../lib/identity.ts";
+import { toMp4 } from "../lib/video.ts";
+import * as is from "../../lexicons/is.ts";
+import * as app from "../../lexicons/app.ts";
 
 // Expiration options in milliseconds
 const EXPIRATION_OPTIONS = {
@@ -20,372 +20,230 @@ const EXPIRATION_OPTIONS = {
   "24h": 24 * 60 * 60 * 1000,
 } as const;
 
-type ExpirationOption = keyof typeof EXPIRATION_OPTIONS | null;
+type ExpirationOption = keyof typeof EXPIRATION_OPTIONS;
+
+const CROSS_POST_LINK = "https://fc.keith.is";
+const CROSS_POST_SUFFIX = "\n\nvia keith's friend club: ";
+
+function rkeyOf(uri: string): string {
+  return uri.split("/").pop()!;
+}
+
+function crossPostRecord(
+  text: string,
+  video: l.BlobRef,
+  aspectRatio: { width: number; height: number },
+) {
+  const prefix = text + CROSS_POST_SUFFIX;
+  const encoder = new TextEncoder();
+  return app.bsky.feed.post.$build({
+    text: prefix + CROSS_POST_LINK,
+    createdAt: l.currentDatetimeString(),
+    langs: ["en"],
+    facets: [
+      {
+        index: {
+          byteStart: encoder.encode(prefix).length,
+          byteEnd: encoder.encode(prefix + CROSS_POST_LINK).length,
+        },
+        features: [
+          app.bsky.richtext.facet.link.$build({
+            uri: CROSS_POST_LINK as l.UriString,
+          }),
+        ],
+      },
+    ],
+    embed: app.bsky.embed.video.$build({ video, aspectRatio }),
+  });
+}
 
 export const apiRoutes = new Elysia({ prefix: "/api" })
+  .resolve(async ({ cookie, headers }) => {
+    const did = cookie[SESSION_COOKIE]?.value as string | undefined;
+    const session = await restoreSession(getOrigin(headers), did);
+    return { session };
+  })
+
   // Get recent messages from cache
   .get("/feed", () => {
     const messages = messageService.getRecentMessages(20);
     return { messages };
   })
 
-  // Get current user's posts from their PDS
-  .get("/my-posts", async ({ query }) => {
-    const sessionId = query.sessionId;
-    if (!sessionId) {
-      return { error: "No session ID provided", posts: [] };
-    }
+  // Who is logged in
+  .get("/me", async ({ session, status }) => {
+    if (!session) return status(401, { error: "Not logged in" });
+    const identity = await resolveIdentity(session.did);
+    return { did: session.did, handle: identity?.handle ?? session.did };
+  })
 
-    const session = getActiveSession(sessionId);
-    if (!session) {
-      return { error: "Invalid or expired session", posts: [] };
-    }
+  // Get current user's posts from their PDS
+  .get("/my-posts", async ({ session, status }) => {
+    if (!session) return status(401, { error: "Not logged in", posts: [] });
 
     try {
-      const response = await session.fetchHandler(
-        `/xrpc/com.atproto.repo.listRecords?repo=${encodeURIComponent(session.did)}&collection=${encodeURIComponent(FC_COLLECTION)}&limit=100`,
-        { method: "GET" },
+      const client = new Client(session);
+      const identity = await resolveIdentity(session.did);
+      const { records } = await client.list(is.keith.fc.message, {
+        limit: 100,
+      });
+
+      // Records that fail schema validation are skipped
+      const posts = records.flatMap((record) =>
+        record.valid
+          ? [
+              {
+                uri: record.uri,
+                rkey: rkeyOf(record.uri),
+                text: record.value.text,
+                videoUrl:
+                  record.value.video && identity
+                    ? blobUrl(identity.pds, session.did, getBlobCidString(record.value.video))
+                    : undefined,
+                blueskyPostUri: record.value.blueskyPostUri,
+                expiresAt: record.value.expiresAt,
+                createdAt: record.value.createdAt,
+              },
+            ]
+          : [],
       );
-
-      if (!response.ok) {
-        const error = await response.text();
-        return { error, posts: [] };
-      }
-
-      const data = await response.json();
-      const posts = data.records.map((record: any) => ({
-        uri: record.uri,
-        rkey: record.uri.split("/").pop(),
-        text: record.value.text,
-        video: record.value.video,
-        blueskyPostUri: record.value.blueskyPostUri,
-        expiresAt: record.value.expiresAt,
-        createdAt: record.value.createdAt,
-      }));
 
       return { posts };
     } catch (error: any) {
-      return { error: error.message, posts: [] };
+      return status(502, { error: error.message, posts: [] });
     }
   })
 
   // Post a message to the custom lexicon (and optionally to Bluesky)
-  .post("/message", async ({ body }) => {
-    try {
-      const { sessionId, text, gifDataUrl, postToBsky, expiresIn } = body as {
-        sessionId: string;
-        text: string;
-        gifDataUrl?: string;
-        postToBsky?: boolean;
-        expiresIn?: ExpirationOption;
-      };
+  .post(
+    "/message",
+    async ({ session, body, status }) => {
+      if (!session) return status(401, { error: "Not logged in" });
 
-      if (!sessionId) {
-        return { success: false, error: "No session ID provided" };
+      // Lexicon lengths count UTF-8 bytes, so emoji-heavy text can pass the form's
+      // character limit and still be invalid. Check before uploading or cross-posting.
+      const textCheck = is.keith.fc.message.$safeValidate({
+        $type: is.keith.fc.message.$type,
+        text: body.text,
+        createdAt: l.currentDatetimeString(),
+      });
+      if (!textCheck.success) {
+        return status(422, { error: "That message is too long. Emoji count as several characters." });
       }
 
-      const session = getActiveSession(sessionId);
-      if (!session) {
-        return { success: false, error: "Invalid or expired session" };
+      const client = new Client(session);
+
+      let video: Awaited<ReturnType<typeof toMp4>>;
+      try {
+        video = await toMp4(new Uint8Array(await body.video.arrayBuffer()));
+      } catch (error) {
+        console.error("[api] ffmpeg conversion failed:", error);
+        return status(422, { error: "Couldn't convert your video to MP4" });
       }
 
-      let videoBlob = undefined;
+      let videoBlob: l.BlobRef;
+      try {
+        const upload = await client.uploadBlob(video.bytes, {
+          encoding: "video/mp4",
+        });
+        videoBlob = upload.body.blob;
+      } catch (error: any) {
+        console.error("[api] Video upload failed:", error);
+        return status(502, { error: `Video upload failed: ${error.message}` });
+      }
 
-      // Upload video if provided
-      if (gifDataUrl) {
-        const base64Data = gifDataUrl.split(",")[1];
-        const bytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-        const mimeType = gifDataUrl.split(";")[0].split(":")[1];
-
-        let videoBytes = bytes;
-        let videoMimeType = mimeType;
-
-        // Convert webm to mp4 if needed (ffmpeg must be installed)
-        if (mimeType === "video/webm") {
-          const tmpInputPath = join(tmpdir(), `fc-input-${Date.now()}.webm`);
-          const tmpOutputPath = join(tmpdir(), `fc-output-${Date.now()}.mp4`);
-
-          try {
-            await writeFile(tmpInputPath, bytes);
-            await $`ffmpeg -i ${tmpInputPath} -c:v libx264 -preset fast -crf 28 -an -movflags +faststart ${tmpOutputPath}`.quiet();
-
-            const mp4File = Bun.file(tmpOutputPath);
-            videoBytes = new Uint8Array(await mp4File.arrayBuffer());
-            videoMimeType = "video/mp4";
-
-            await unlink(tmpInputPath);
-            await unlink(tmpOutputPath);
-          } catch (error) {
-            console.warn(
-              "[api] ffmpeg conversion failed, using webm directly:",
-              error,
-            );
-            try {
-              await unlink(tmpInputPath);
-              await unlink(tmpOutputPath);
-            } catch {}
-            // Fall back to webm - some PDS servers may accept it
-          }
-        }
-
-        // Upload blob to user's PDS
-        console.log(
-          `[api] Uploading video blob (${videoBytes.length} bytes, ${videoMimeType}) to PDS...`,
-        );
-        const uploadStart = Date.now();
-        let uploadResponse;
+      // Post to Bluesky first so the message can link to it
+      let blueskyPostUri: l.AtUriString | undefined;
+      if (body.postToBsky === "true") {
         try {
-          uploadResponse = await session.fetchHandler(
-            "/xrpc/com.atproto.repo.uploadBlob",
-            {
-              method: "POST",
-              headers: { "Content-Type": videoMimeType },
-              body: videoBytes,
-            },
+          const post = await client.create(
+            app.bsky.feed.post,
+            crossPostRecord(body.text, videoBlob, {
+              width: video.width,
+              height: video.height,
+            }),
           );
-          console.log(
-            `[api] Upload completed in ${Date.now() - uploadStart}ms, status: ${uploadResponse.status}`,
-          );
-        } catch (uploadError: any) {
-          console.error(
-            `[api] Upload fetch error after ${Date.now() - uploadStart}ms:`,
-            uploadError,
-          );
-          return {
-            success: false,
-            error: `Upload failed: ${uploadError.message}`,
-          };
+          blueskyPostUri = post.uri;
+        } catch (error) {
+          console.error("[api] Cross-post to Bluesky failed:", error);
         }
-
-        if (!uploadResponse.ok) {
-          const errorText = await uploadResponse.text();
-          console.error(
-            `[api] Failed to upload video: ${uploadResponse.status} ${errorText}`,
-          );
-          return {
-            success: false,
-            error: `Failed to upload video: ${errorText}`,
-          };
-        }
-
-        const uploadData = await uploadResponse.json();
-        console.log(`[api] Video uploaded successfully:`, uploadData.blob);
-        videoBlob = uploadData.blob;
       }
 
-      // Calculate expiration time
+      const expiresIn = body.expiresIn as ExpirationOption | undefined;
       const expiresAt = expiresIn
-        ? new Date(Date.now() + EXPIRATION_OPTIONS[expiresIn]).toISOString()
+        ? l.toDatetimeString(new Date(Date.now() + EXPIRATION_OPTIONS[expiresIn]))
         : undefined;
 
-      // Create the record for our custom lexicon
-      const fcRecord: any = {
-        text,
-        createdAt: new Date().toISOString(),
-      };
-
-      if (videoBlob) {
-        fcRecord.video = videoBlob;
-      }
-
-      if (expiresAt) {
-        fcRecord.expiresAt = expiresAt;
-      }
-
-      // Optionally post to Bluesky first so we can get the URI
-      let blueskyPostUri: string | undefined;
-
-      if (postToBsky) {
-        console.log("[api] Cross-posting to Bluesky...");
-        const bskyRecord: any = {
-          $type: "app.bsky.feed.post",
-          text: text + "\n\nvia keith's friend club: https://fc.keith.is",
-          createdAt: new Date().toISOString(),
-          langs: ["en"],
-          facets: [
-            {
-              index: {
-                byteStart: new TextEncoder().encode(
-                  text + "\n\nvia keith's friend club: ",
-                ).length,
-                byteEnd: new TextEncoder().encode(
-                  text + "\n\nvia keith's friend club: https://fc.keith.is",
-                ).length,
-              },
-              features: [
-                {
-                  $type: "app.bsky.richtext.facet#link",
-                  uri: "https://fc.keith.is",
-                },
-              ],
-            },
-          ],
-        };
-
-        if (videoBlob) {
-          bskyRecord.embed = {
-            $type: "app.bsky.embed.video",
-            video: videoBlob,
-            aspectRatio: { width: 640, height: 480 },
-          };
-        }
-
-        const bskyResponse = await session.fetchHandler(
-          "/xrpc/com.atproto.repo.createRecord",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              repo: session.did,
-              collection: "app.bsky.feed.post",
-              record: bskyRecord,
-            }),
-          },
-        );
-
-        if (bskyResponse.ok) {
-          const bskyData = await bskyResponse.json();
-          blueskyPostUri = bskyData.uri;
-          fcRecord.blueskyPostUri = blueskyPostUri;
-          console.log("[api] Cross-posted to Bluesky:", blueskyPostUri);
-        } else {
-          const errorText = await bskyResponse.text();
-          console.error(
-            "[api] Failed to cross-post to Bluesky:",
-            bskyResponse.status,
-            errorText,
-          );
-        }
-      }
-
-      // Create record in our custom lexicon
-      const createResponse = await session.fetchHandler(
-        "/xrpc/com.atproto.repo.createRecord",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repo: session.did,
-            collection: FC_COLLECTION,
-            record: fcRecord,
-          }),
-        },
-      );
-
-      if (!createResponse.ok) {
-        const error = await createResponse.text();
-        return { success: false, error };
-      }
-
-      const data = await createResponse.json();
-      const rkey = data.uri.split("/").pop();
-
-      // Get user handle for response
-      const sessionData = userSessionStore.get(sessionId);
-      const handle = sessionData?.handle || session.did;
-
-      // Build Bluesky post URL if we cross-posted
-      let blueskyPostUrl: string | undefined;
-      if (blueskyPostUri) {
-        const postId = blueskyPostUri.split("/").pop();
-        blueskyPostUrl = `https://bsky.app/profile/${handle}/post/${postId}`;
-      }
-
-      return {
-        success: true,
-        uri: data.uri,
-        rkey,
+      const record = is.keith.fc.message.$build({
+        text: body.text,
+        video: videoBlob,
         blueskyPostUri,
-        blueskyPostUrl,
-      };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  })
+        expiresAt,
+        createdAt: l.currentDatetimeString(),
+      });
+      try {
+        const created = await client.create(is.keith.fc.message, record);
+
+        let blueskyPostUrl: string | undefined;
+        if (blueskyPostUri) {
+          blueskyPostUrl = `https://bsky.app/profile/${session.did}/post/${rkeyOf(blueskyPostUri)}`;
+        }
+
+        return {
+          success: true,
+          uri: created.uri,
+          rkey: rkeyOf(created.uri),
+          blueskyPostUri,
+          blueskyPostUrl,
+        };
+      } catch (error: any) {
+        return status(502, { error: error.message });
+      }
+    },
+    {
+      body: t.Object({
+        text: t.String({ maxLength: 255 }),
+        video: t.File({ maxSize: 10 * 1024 * 1024 }),
+        postToBsky: t.Optional(t.String()),
+        expiresIn: t.Optional(
+          t.Union(
+            Object.keys(EXPIRATION_OPTIONS).map((key) => t.Literal(key)),
+          ),
+        ),
+      }),
+    },
+  )
 
   // Delete a message from the user's PDS (and Bluesky if cross-posted)
-  .delete("/message/:rkey", async ({ params, query }) => {
+  .delete("/message/:rkey", async ({ session, params, status }) => {
+    if (!session) return status(401, { error: "Not logged in" });
+
+    const client = new Client(session);
     const { rkey } = params;
-    const sessionId = query.sessionId;
-
-    if (!sessionId) {
-      return { success: false, error: "No session ID provided" };
-    }
-
-    const session = getActiveSession(sessionId);
-    if (!session) {
-      return { success: false, error: "Invalid or expired session" };
-    }
 
     try {
-      // First, fetch the record to check if it has a blueskyPostUri
-      const getResponse = await session.fetchHandler(
-        `/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(session.did)}&collection=${encodeURIComponent(FC_COLLECTION)}&rkey=${encodeURIComponent(rkey)}`,
-        { method: "GET" },
-      );
-
-      let blueskyPostUri: string | undefined;
-      if (getResponse.ok) {
-        const record = await getResponse.json();
-        blueskyPostUri = record.value?.blueskyPostUri;
-      }
-
-      // If there's a cross-posted Bluesky post, delete it first
+      // Delete the cross-posted Bluesky post first, if there is one
+      const record = await client
+        .get(is.keith.fc.message, { rkey })
+        .catch(() => null);
+      const blueskyPostUri = record?.value.blueskyPostUri;
       if (blueskyPostUri) {
-        // Extract rkey from URI: at://did:plc:xxx/app.bsky.feed.post/rkey
-        const bskyRkey = blueskyPostUri.split("/").pop();
-        if (bskyRkey) {
-          console.log(
-            "[api] Deleting cross-posted Bluesky post:",
-            blueskyPostUri,
+        await client
+          .delete(app.bsky.feed.post, { rkey: rkeyOf(blueskyPostUri) })
+          .catch((error) =>
+            console.error("[api] Failed to delete Bluesky post:", error),
           );
-          const bskyDeleteResponse = await session.fetchHandler(
-            "/xrpc/com.atproto.repo.deleteRecord",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                repo: session.did,
-                collection: "app.bsky.feed.post",
-                rkey: bskyRkey,
-              }),
-            },
-          );
-
-          if (!bskyDeleteResponse.ok) {
-            const error = await bskyDeleteResponse.text();
-            console.error("[api] Failed to delete Bluesky post:", error);
-            // Continue with FC deletion even if Bluesky deletion fails
-          } else {
-            console.log("[api] Bluesky post deleted successfully");
-          }
-        }
       }
 
-      // Delete the FC message
-      const response = await session.fetchHandler(
-        "/xrpc/com.atproto.repo.deleteRecord",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            repo: session.did,
-            collection: FC_COLLECTION,
-            rkey,
-          }),
-        },
+      await client.delete(is.keith.fc.message, { rkey });
+
+      // Jetstream will also report the delete; removing now keeps the UI snappy
+      messageService.deleteMessage(
+        `at://${session.did}/${is.keith.fc.message.$type}/${rkey}`,
       );
-
-      if (!response.ok) {
-        const error = await response.text();
-        return { success: false, error };
-      }
-
-      // Also remove from local cache
-      messageService.deleteMessage(rkey);
 
       return { success: true };
     } catch (error: any) {
-      return { success: false, error: error.message };
+      return status(502, { error: error.message });
     }
   });

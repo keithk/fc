@@ -1,34 +1,33 @@
-// ABOUTME: Jetstream WebSocket client for real-time ATProto events
-// ABOUTME: Subscribes to is.keith.fc.message records and broadcasts to chat
+// ABOUTME: Jetstream v2 WebSocket client for real-time ATProto events
+// ABOUTME: Subscribes to is.keith.fc.message records, resuming from a saved cursor
 
-import type { ChatMessage } from "../../db/adapters/base";
-import { FC_COLLECTION } from "../../shared/config";
+import { getBlobCidString, jsonToLex, type JsonValue } from "@atproto/lex";
+import type { ChatMessage } from "../../db/adapters/base.ts";
+import { getSetting, setSetting } from "../../db/database.ts";
+import { FC_COLLECTION } from "../../shared/config.ts";
+import { blobUrl, resolveIdentity } from "./identity.ts";
+import * as is from "../../lexicons/is.ts";
 
-const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe";
+const JETSTREAM_URL =
+  "wss://jetstream.us-east.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents";
+const CURSOR_KEY = "jetstream_cursor";
+// Save the cursor at most this often; replaying a few seconds on restart is harmless
+const CURSOR_SAVE_INTERVAL_MS = 5000;
 
-export interface FcMessageRecord {
-  text: string;
-  video?: { ref: { $link: string }; mimeType: string; size: number };
-  blueskyPostUri?: string;
-  expiresAt?: string;
-  createdAt: string;
-}
-
-interface JetstreamCommitEvent {
+interface JetstreamCommit {
+  $type: "network.bsky.jetstream.subscribeEvents#commit";
   did: string;
-  time_us: number;
-  kind: "commit";
-  commit: {
-    rev: string;
-    operation: "create" | "update" | "delete";
-    collection: string;
-    rkey: string;
-    record?: FcMessageRecord;
-    cid?: string;
-  };
+  seq: number;
+  operation: "create" | "update" | "delete";
+  collection: string;
+  rkey: string;
+  record?: JsonValue;
 }
 
-type JetstreamEvent = JetstreamCommitEvent | { kind: "identity" | "account" };
+interface JetstreamEnvelope {
+  $type: string;
+  payload?: { $type: string; seq?: number };
+}
 
 type MessageHandler = (
   message: ChatMessage,
@@ -40,8 +39,8 @@ let reconnectAttempts = 0;
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let isShuttingDown = false;
 let messageHandler: MessageHandler | null = null;
-let handleResolver: ((did: string) => Promise<string | undefined>) | null =
-  null;
+let lastSeq: number | undefined;
+let lastSavedAt = 0;
 
 function getReconnectDelay(): number {
   const baseDelay = 1000;
@@ -49,88 +48,67 @@ function getReconnectDelay(): number {
   return Math.min(baseDelay * Math.pow(2, reconnectAttempts), maxDelay);
 }
 
-async function processEvent(event: JetstreamCommitEvent): Promise<void> {
-  const { did, commit } = event;
-  const { operation, collection, rkey, record } = commit;
+function rememberCursor(seq: number | undefined): void {
+  if (seq === undefined) return;
+  lastSeq = seq;
+  if (Date.now() - lastSavedAt > CURSOR_SAVE_INTERVAL_MS) {
+    setSetting(CURSOR_KEY, String(seq));
+    lastSavedAt = Date.now();
+  }
+}
 
-  if (collection !== FC_COLLECTION) return;
+async function processCommit(commit: JetstreamCommit): Promise<void> {
+  const { did, operation, collection, rkey } = commit;
+  if (collection !== FC_COLLECTION || !messageHandler) return;
 
   const uri = `at://${did}/${collection}/${rkey}`;
 
-  try {
-    if (operation === "delete") {
-      if (messageHandler) {
-        messageHandler(
-          { id: rkey, text: "", userId: did, timestamp: 0 },
-          "delete",
-        );
-      }
-      console.log(`[jetstream] Deleted message: ${uri}`);
-    } else if (operation === "create" || operation === "update") {
-      if (!record) return;
-
-      // Skip expired messages
-      if (record.expiresAt && new Date(record.expiresAt) < new Date()) {
-        console.log(`[jetstream] Skipping expired message: ${uri}`);
-        return;
-      }
-
-      const handle = handleResolver ? await handleResolver(did) : undefined;
-
-      // Build video URL if there's a video blob
-      let videoUrl: string | undefined;
-      if (record.video?.ref?.$link) {
-        // Resolve user's PDS from their DID document
-        try {
-          const didDocResponse = await fetch(`https://plc.directory/${did}`);
-          if (didDocResponse.ok) {
-            const didDoc = await didDocResponse.json();
-            // Find the PDS service endpoint
-            const pdsService = didDoc.service?.find(
-              (s: any) =>
-                s.id === "#atproto_pds" ||
-                s.type === "AtprotoPersonalDataServer",
-            );
-            if (pdsService?.serviceEndpoint) {
-              videoUrl = `${pdsService.serviceEndpoint}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(record.video.ref.$link)}`;
-            }
-          }
-        } catch (err) {
-          console.error(`[jetstream] Failed to resolve PDS for ${did}:`, err);
-        }
-      }
-
-      const message: ChatMessage = {
-        id: rkey,
-        text: record.text,
-        userId: did,
-        userHandle: handle,
-        timestamp: new Date(record.createdAt).getTime(),
-        gif: videoUrl,
-        blueskyPostUri: record.blueskyPostUri,
-      };
-
-      if (messageHandler) {
-        messageHandler(message, "create");
-      }
-      console.log(
-        `[jetstream] New message from ${handle || did}: ${record.text.substring(0, 50)}${videoUrl ? " (with video)" : ""}`,
-      );
-    }
-  } catch (error) {
-    console.error(`[jetstream] Error processing event:`, error);
+  if (operation === "delete") {
+    messageHandler({ id: uri, text: "", userId: did, timestamp: 0 }, "delete");
+    return;
   }
+
+  const parsed = is.keith.fc.message.$safeParse(jsonToLex(commit.record ?? null));
+  if (!parsed.success) {
+    console.warn(`[jetstream] Ignoring invalid record ${uri}:`, parsed.reason);
+    return;
+  }
+  const record = parsed.value;
+
+  if (record.expiresAt && new Date(record.expiresAt) < new Date()) return;
+
+  const identity = await resolveIdentity(did);
+
+  messageHandler(
+    {
+      id: uri,
+      text: record.text,
+      userId: did,
+      userHandle: identity?.handle,
+      timestamp: new Date(record.createdAt).getTime(),
+      videoUrl:
+        record.video && identity
+          ? blobUrl(identity.pds, did, getBlobCidString(record.video))
+          : undefined,
+      blueskyPostUri: record.blueskyPostUri,
+      expiresAt: record.expiresAt
+        ? new Date(record.expiresAt).getTime()
+        : undefined,
+    },
+    "create",
+  );
 }
 
 function connect(): void {
   if (isShuttingDown) return;
 
-  const params = new URLSearchParams();
-  params.append("wantedCollections", FC_COLLECTION);
+  const url = new URL(JETSTREAM_URL);
+  url.searchParams.set("collections", FC_COLLECTION);
+  url.searchParams.set("kinds", "commit");
+  const cursor = lastSeq ?? getSetting(CURSOR_KEY);
+  if (cursor) url.searchParams.set("cursor", String(cursor));
 
-  const url = `${JETSTREAM_URL}?${params}`;
   console.log(`[jetstream] Connecting to ${url}`);
-
   ws = new WebSocket(url);
 
   ws.onopen = () => {
@@ -140,12 +118,15 @@ function connect(): void {
 
   ws.onmessage = async (event) => {
     try {
-      const data = JSON.parse(event.data as string) as JetstreamEvent;
-      if (data.kind === "commit") {
-        await processEvent(data as JetstreamCommitEvent);
+      const envelope = JSON.parse(event.data as string) as JetstreamEnvelope;
+      const payload = envelope.payload;
+      if (!payload) return;
+      if (payload.$type === "network.bsky.jetstream.subscribeEvents#commit") {
+        await processCommit(payload as JetstreamCommit);
       }
+      rememberCursor(payload.seq);
     } catch (error) {
-      console.error("[jetstream] Error parsing message:", error);
+      console.error("[jetstream] Error handling event:", error);
     }
   };
 
@@ -156,40 +137,24 @@ function connect(): void {
   ws.onclose = (event) => {
     console.log(`[jetstream] Disconnected (code: ${event.code})`);
     ws = null;
-
-    if (!isShuttingDown) {
-      scheduleReconnect();
-    }
+    if (!isShuttingDown) scheduleReconnect();
   };
 }
 
 function scheduleReconnect(): void {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-  }
+  if (reconnectTimeout) clearTimeout(reconnectTimeout);
 
   const delay = getReconnectDelay();
   reconnectAttempts++;
   console.log(
     `[jetstream] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`,
   );
-
-  reconnectTimeout = setTimeout(() => {
-    connect();
-  }, delay);
+  reconnectTimeout = setTimeout(connect, delay);
 }
 
-export interface JetstreamOptions {
-  onMessage: MessageHandler;
-  resolveHandle: (did: string) => Promise<string | undefined>;
-}
-
-export function startJetstream(options: JetstreamOptions): void {
-  console.log(
-    "[jetstream] Starting Jetstream consumer for is.keith.fc.message",
-  );
-  messageHandler = options.onMessage;
-  handleResolver = options.resolveHandle;
+export function startJetstream(onMessage: MessageHandler): void {
+  console.log(`[jetstream] Starting Jetstream consumer for ${FC_COLLECTION}`);
+  messageHandler = onMessage;
   isShuttingDown = false;
   connect();
 }
@@ -197,6 +162,8 @@ export function startJetstream(options: JetstreamOptions): void {
 export function stopJetstream(): void {
   console.log("[jetstream] Stopping Jetstream consumer");
   isShuttingDown = true;
+
+  if (lastSeq !== undefined) setSetting(CURSOR_KEY, String(lastSeq));
 
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
