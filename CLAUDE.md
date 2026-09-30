@@ -68,6 +68,10 @@ Plain custom elements in `src/public/js/components/` (`fc-camera`, `fc-composer`
 - `STORAGE_ADAPTER` — `sqlite` (default) or `json` for the message cache
 - `DATA_DIR` — path to data directory (default: `data`); must persist across deploys for sessions to survive
 
+## Deployment
+
+Keith's deploy system (the `deploy` MCP server, site `fc`) builds `main` with Railpack on every push and serves https://fc.keith.is. `DATA_DIR=/data` is persistent storage. The site sleeps when idle, so Jetstream and the expiration job pause until the next request wakes it.
+
 ## Gotchas
 
 - Bun can't run this: `@atproto`'s SSRF-protected fetch requires Node's bundled undici

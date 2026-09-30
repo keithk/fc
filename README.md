@@ -81,7 +81,9 @@ so other atproto tools can resolve `is.keith.fc.message`:
 
 ## deployment
 
-railway builds with railpack (`railpack.json` pins node 24 and installs ffmpeg). set `BASE_URL`, `OAUTH_PRIVATE_KEY`, and `COOKIE_SECRET`, and put `DATA_DIR` on a persistent volume so sessions and the jetstream cursor survive deploys.
+fc.keith.is runs on keith's deploy system, which builds `main` with railpack on every push (`railpack.json` pins node 24 and installs ffmpeg). the site has `BASE_URL`, `OAUTH_PRIVATE_KEY`, and `COOKIE_SECRET` set, and `DATA_DIR` points at persistent storage so sessions and the jetstream cursor survive deploys.
+
+the site sleeps when idle. while it's asleep, jetstream isn't connected and the expiration job doesn't run; on wake it resumes from the saved cursor and catches up on expirations.
 
 ## privacy
 
