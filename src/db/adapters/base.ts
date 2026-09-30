@@ -4,9 +4,10 @@
  */
 
 export interface ChatMessage {
+  // AT-URI of the is.keith.fc.message record
   id: string;
   text: string;
-  gif?: string;
+  videoUrl?: string;
   userId: string;
   userHandle?: string;
   timestamp: number;
@@ -20,12 +21,6 @@ export interface StorageAdapter {
 
   // get recent messages (oldest first for display)
   getRecentMessages(limit?: number): ChatMessage[];
-
-  // get all messages (for export)
-  getAllMessages(): ChatMessage[];
-
-  // get count of messages
-  getMessageCount(): number;
 
   // delete a message by id
   deleteMessage(id: string): void;

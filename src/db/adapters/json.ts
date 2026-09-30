@@ -1,9 +1,9 @@
 // ABOUTME: JSON file storage adapter for chat messages
 // ABOUTME: Simple file-based storage alternative to SQLite
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { dirname } from "path";
-import type { StorageAdapter, ChatMessage } from "./base";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import type { StorageAdapter, ChatMessage } from "./base.ts";
 
 export class JSONAdapter implements StorageAdapter {
   private filePath: string;
@@ -32,10 +32,9 @@ export class JSONAdapter implements StorageAdapter {
       this.messages.push(message);
     }
 
-    // keep only last 20
-    if (this.messages.length > 20) {
-      this.messages = this.messages.slice(-20);
-    }
+    // keep only last 20, plus messages waiting for the cleanup job to expire them
+    const keep = new Set(this.messages.slice(-20));
+    this.messages = this.messages.filter((m) => keep.has(m) || m.expiresAt);
 
     this.writeMessages();
   }
@@ -45,14 +44,6 @@ export class JSONAdapter implements StorageAdapter {
     return this.messages
       .filter((m) => !m.expiresAt || m.expiresAt > now)
       .slice(-limit);
-  }
-
-  getAllMessages(): ChatMessage[] {
-    return [...this.messages];
-  }
-
-  getMessageCount(): number {
-    return this.messages.length;
   }
 
   deleteMessage(id: string): void {
