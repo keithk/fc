@@ -1,85 +1,120 @@
-// ABOUTME: Bluesky OAuth client setup
-// ABOUTME: Uses server-side OAuth to post on behalf of users
+// ABOUTME: Confidential atproto OAuth client with sessions persisted in SQLite
+// ABOUTME: Signs token requests with the ES256 key from OAUTH_PRIVATE_KEY
 
-import { NodeOAuthClient } from "@atproto/oauth-client-node";
-import { OAUTH_SCOPE_STRING_METADATA, APP_CONFIG } from "../../shared/config";
+import {
+  JoseKey,
+  NodeOAuthClient,
+  type NodeSavedSession,
+  type NodeSavedState,
+  type RuntimeLock,
+} from "@atproto/oauth-client-node";
+import { getDatabase } from "../../db/database.ts";
+import { APP_CONFIG, OAUTH_SCOPE_STRING } from "../../shared/config.ts";
 
-// in-memory stores for oauth state and sessions
-const stateStore = new Map();
-const sessionStore = new Map();
+// Authorization state only needs to live for the length of one login
+const STATE_TTL_MS = 60 * 60 * 1000;
 
-// cache oauth clients by origin (local/ngrok/production)
-const oauthClients = new Map<string, NodeOAuthClient>();
+const stateStore = {
+  async get(key: string): Promise<NodeSavedState | undefined> {
+    const row = getDatabase()
+      .prepare("SELECT value FROM oauth_state WHERE key = ? AND created_at > ?")
+      .get(key, Date.now() - STATE_TTL_MS) as { value: string } | undefined;
+    return row ? JSON.parse(row.value) : undefined;
+  },
+  async set(key: string, value: NodeSavedState): Promise<void> {
+    const db = getDatabase();
+    db.prepare("DELETE FROM oauth_state WHERE created_at <= ?").run(
+      Date.now() - STATE_TTL_MS,
+    );
+    db.prepare(
+      "INSERT OR REPLACE INTO oauth_state (key, value, created_at) VALUES (?, ?, ?)",
+    ).run(key, JSON.stringify(value), Date.now());
+  },
+  async del(key: string): Promise<void> {
+    getDatabase().prepare("DELETE FROM oauth_state WHERE key = ?").run(key);
+  },
+};
 
-export async function getOAuthClient(origin: string) {
-  console.log(`[oauth-client] getOAuthClient called with origin: ${origin}`);
-  if (!oauthClients.has(origin)) {
-    console.log(`[oauth-client] Creating new OAuth client for: ${origin}`);
+const sessionStore = {
+  async get(did: string): Promise<NodeSavedSession | undefined> {
+    const row = getDatabase()
+      .prepare("SELECT value FROM oauth_session WHERE key = ?")
+      .get(did) as { value: string } | undefined;
+    return row ? JSON.parse(row.value) : undefined;
+  },
+  async set(did: string, value: NodeSavedSession): Promise<void> {
+    getDatabase()
+      .prepare(
+        "INSERT OR REPLACE INTO oauth_session (key, value, updated_at) VALUES (?, ?, ?)",
+      )
+      .run(did, JSON.stringify(value), Date.now());
+  },
+  async del(did: string): Promise<void> {
+    getDatabase().prepare("DELETE FROM oauth_session WHERE key = ?").run(did);
+  },
+};
 
-    // Custom fetch that bypasses TLS validation for internal requests
-    // This is needed because the container routes fc.keith.is to localhost
-    const customFetch: typeof fetch = async (input, init) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
-      console.log(`[oauth-client] fetch: ${url}`);
-      return fetch(input, init);
-    };
-
-    const client = new NodeOAuthClient({
-      // Allow HTTP for development (container internal requests)
-      allowHttp: true,
-      fetch: customFetch,
-      clientMetadata: {
-        client_id: `${origin}/oauth-client-metadata.json`,
-        client_name: APP_CONFIG.appName,
-        client_uri: origin,
-        redirect_uris: [`${origin}/oauth/callback`],
-        scope: OAUTH_SCOPE_STRING_METADATA,
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-        application_type: "web",
-        dpop_bound_access_tokens: true,
-      },
-      stateStore: {
-        get: async (key: string) => stateStore.get(key),
-        set: async (key: string, value: any) => {
-          stateStore.set(key, value);
-        },
-        del: async (key: string) => {
-          stateStore.delete(key);
-        },
-      },
-      sessionStore: {
-        get: async (key: string) => sessionStore.get(key),
-        set: async (key: string, value: any) => {
-          sessionStore.set(key, value);
-        },
-        del: async (key: string) => {
-          sessionStore.delete(key);
-        },
-      },
-      // static dpop key for signing requests
-      // in production, generate this dynamically and store securely
-      keyset: [
-        {
-          kid: "face-chat-key",
-          alg: "ES256",
-          kty: "EC",
-          crv: "P-256",
-          x: "SVqiG6LZTh0jJlJkLICLfx-RPqHH4TnT2PaI8JZH6Qc",
-          y: "xdMcEFMSJPtgYAQPBfUp5F8TBvJwRmHvuUx-QTBbPRo",
-          d: "N-VjbD7IV0a1K3K8TtKQ7kLKkTtt_vCGvqwYp6NPSHY",
-        },
-      ],
-    });
-    oauthClients.set(origin, client);
-  }
-  return oauthClients.get(origin)!;
+// Cheap check for page renders: does this DID still have a stored session?
+export function hasStoredSession(did: string): boolean {
+  return Boolean(
+    getDatabase().prepare("SELECT 1 FROM oauth_session WHERE key = ?").get(did),
+  );
 }
 
-export { sessionStore as userSessionStore };
+// One server process, so an in-process lock keeps token refreshes from racing
+const locks = new Map<string, Promise<unknown>>();
+const requestLock: RuntimeLock = async (key, fn) => {
+  const previous = locks.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(fn);
+  locks.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (locks.get(key) === current) locks.delete(key);
+  }
+};
+
+async function loadKeyset() {
+  const privateKey = process.env.OAUTH_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error(
+      "OAUTH_PRIVATE_KEY is not set. Run `npm run keygen` and add the output to your environment.",
+    );
+  }
+  return [await JoseKey.fromImportable(privateKey)];
+}
+
+// Cache one client per origin so local, tunnel, and production URLs all work
+const oauthClients = new Map<string, Promise<NodeOAuthClient>>();
+
+export function getOAuthClient(origin: string): Promise<NodeOAuthClient> {
+  let client = oauthClients.get(origin);
+  if (!client) {
+    client = loadKeyset().then(
+      (keyset) =>
+        new NodeOAuthClient({
+          clientMetadata: {
+            client_id: `${origin}/oauth-client-metadata.json`,
+            client_name: APP_CONFIG.appName,
+            client_uri: origin,
+            policy_uri: `${origin}/privacy`,
+            redirect_uris: [`${origin}/oauth/callback`],
+            scope: OAUTH_SCOPE_STRING,
+            grant_types: ["authorization_code", "refresh_token"],
+            response_types: ["code"],
+            application_type: "web",
+            token_endpoint_auth_method: "private_key_jwt",
+            token_endpoint_auth_signing_alg: "ES256",
+            dpop_bound_access_tokens: true,
+            jwks_uri: `${origin}/jwks.json`,
+          },
+          keyset,
+          stateStore,
+          sessionStore,
+          requestLock,
+        }),
+    );
+    oauthClients.set(origin, client);
+  }
+  return client;
+}

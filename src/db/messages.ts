@@ -3,16 +3,16 @@
  * uses a storage adapter pattern so you can swap out the backend
  *
  * available adapters:
- * - SQLiteAdapter (default) - uses bun:sqlite
+ * - SQLiteAdapter (default) - uses node:sqlite
  * - JSONAdapter - simple json file, no database needed
  *
  * to change adapter, set STORAGE_ADAPTER env var:
- *   STORAGE_ADAPTER=json bun run dev
+ *   STORAGE_ADAPTER=json npm run dev
  */
 
-import type { StorageAdapter, ChatMessage } from "./adapters/base";
-import { SQLiteAdapter } from "./adapters/sqlite";
-import { JSONAdapter } from "./adapters/json";
+import type { StorageAdapter, ChatMessage } from "./adapters/base.ts";
+import { SQLiteAdapter } from "./adapters/sqlite.ts";
+import { JSONAdapter } from "./adapters/json.ts";
 
 // choose storage adapter based on env var
 function createAdapter(): StorageAdapter {
@@ -40,14 +40,6 @@ class MessageService {
 
   getRecentMessages(limit: number = 20): ChatMessage[] {
     return this.adapter.getRecentMessages(limit);
-  }
-
-  getAllMessages(): ChatMessage[] {
-    return this.adapter.getAllMessages();
-  }
-
-  getMessageCount(): number {
-    return this.adapter.getMessageCount();
   }
 
   deleteMessage(id: string): void {

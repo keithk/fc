@@ -1,40 +1,43 @@
 // ABOUTME: Shared configuration for friend club
 // ABOUTME: Centralizes OAuth scopes, app settings, and URLs
 
-const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:3891";
-
 // Custom lexicon for friend club messages
 export const FC_COLLECTION = "is.keith.fc.message";
 
-// OAuth scopes - all scope definitions live here
-// Note: bskyPost needs URL-encoding in metadata but decoded in authorize calls
+// OAuth permissions requested from the user's PDS
 export const OAUTH_SCOPES = {
   // Base ATProto access
   base: "atproto",
-  // Write to our custom lexicon
+  // Write to our custom lexicon (all actions)
   customLexicon: `repo:${FC_COLLECTION}`,
-  // Cross-post to Bluesky feed (optional) - create and delete
+  // Cross-post to Bluesky and delete those cross-posts
   bskyPost: "repo:app.bsky.feed.post?action=create&action=delete",
-  // Upload video/image blobs
-  videoBlob: "blob:video/*",
-  imageBlob: "blob:image/*",
+  // Upload the converted video
+  videoBlob: "blob:video/mp4",
 };
 
-// Scope string for authorize() calls - uses decoded scopes
 export const OAUTH_SCOPE_STRING = Object.values(OAUTH_SCOPES).join(" ");
 
-// Scope string for client metadata - same as authorize scopes
-// The OAuth library should handle any necessary encoding
-export const OAUTH_SCOPE_STRING_METADATA = OAUTH_SCOPE_STRING;
-
-export const OAUTH_CONFIG = {
-  clientId: `${BASE_URL}/oauth-client-metadata.json`,
-  redirectUri: `${BASE_URL}/oauth/callback`,
-  scopes: OAUTH_SCOPE_STRING,
-};
-
 export const APP_CONFIG = {
-  port: 3891,
+  port: Number(process.env.PORT) || 3891,
   appName: "keith's friend club",
-  appUrl: BASE_URL,
+  dataDir: process.env.DATA_DIR || "data",
 };
+
+// Get the public origin, preferring BASE_URL and falling back to request headers
+export function getOrigin(headers: Record<string, string | undefined>): string {
+  const baseUrl = process.env.BASE_URL;
+  if (
+    baseUrl &&
+    !baseUrl.includes("localhost") &&
+    !baseUrl.includes("127.0.0.1")
+  ) {
+    return baseUrl.replace(/\/$/, "");
+  }
+
+  const host = headers["host"] || `127.0.0.1:${APP_CONFIG.port}`;
+  const protocol =
+    headers["x-forwarded-proto"] ||
+    (host.includes("ngrok") || host.includes("keith.is") ? "https" : "http");
+  return `${protocol}://${host}`;
+}

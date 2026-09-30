@@ -1,271 +1,93 @@
 # 🐻 keith's friend club
 
-a simple video chat app for bluesky using oauth. record a 2-second video, write a message, and share it with friends.
+a tiny video chat on the AT Protocol. log in with bluesky, record a 2-second video, write a message, and share it. messages live on your own PDS; this server only caches the last 20.
 
 built by [keith kurson](https://keith.is) with:
-- [bun](https://bun.sh) - fast javascript runtime
-- [elysia](https://elysiajs.com) - fast web framework
-- [bluesky oauth](https://atproto.com/specs/oauth) - decentralized auth
-- sqlite or json - your choice of storage
-
-## features
-
-- **bluesky oauth login** - users log in with their bluesky account
-- **2-second video recording** - capture short video messages
-- **real-time chat** - websocket-based updates
-- **auto-posting to bluesky** - optionally share messages to your bluesky feed
-- **persistent storage** - keeps last 20 messages (sqlite or json file)
-- **privacy-focused** - no tracking, minimal data storage
+- [node](https://nodejs.org) 24+ (runs the typescript directly, no build step)
+- [elysia](https://elysiajs.com) on its node adapter
+- [@atproto/lex](https://atproto.com/blog/ts-sdk-upgrades) for typed records and xrpc
+- [@atproto/oauth-client-node](https://atproto.com/specs/oauth) as a confidential oauth client
+- [jetstream](https://bsky.network/docs/jetstream/) v2 for the live feed
+- plain custom elements on the frontend
 
 ## quick start
 
 ### prerequisites
 
-- [bun](https://bun.sh) installed (`curl -fsSL https://bun.sh/install | bash`)
-- [ffmpeg](https://ffmpeg.org) for video conversion (`brew install ffmpeg` on mac)
-- a public url (ngrok, cloudflare tunnel, or deployed server)
+- node 24 or newer
+- [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`), which also provides `ffprobe`
+- a public https url (ngrok, a cloudflare tunnel, or a deployed server). atproto oauth won't accept `http://` or IP-address client ids
 
-### installation
-
-```bash
-# clone the repo
-git clone <your-repo-url>
-cd fc
-
-# install dependencies
-bun install
-
-# set up the database (if using sqlite)
-bun run db:setup
-
-# run in development
-bun run dev
-```
-
-the app will start at `http://127.0.0.1:3891`
-
-### important: using a public url
-
-bluesky oauth requires a publicly accessible url. you have a few options:
-
-#### option 1: ngrok (easiest for local development)
+### setup
 
 ```bash
-# install ngrok
-brew install ngrok
+bun install            # or npm install
 
-# start ngrok
-ngrok http 3891
+# generate the oauth signing key and cookie secret, then paste both into .env
+npm run keygen
 
-# use the https url ngrok gives you
-# example: https://abc123.ngrok.io
+# point BASE_URL at your public url
+echo "BASE_URL=https://your-tunnel.example.com" >> .env
+
+npm run dev
 ```
 
-#### option 2: cloudflare tunnel
-
-```bash
-# install cloudflared
-brew install cloudflare/cloudflare/cloudflared
-
-# start tunnel
-cloudflared tunnel --url http://localhost:3891
-```
-
-#### option 3: deploy to production
-
-deploy to any hosting service that supports bun:
-- [fly.io](https://fly.io)
-- [railway](https://railway.app)
-- [render](https://render.com)
-
-## configuration
-
-### storage adapters
-
-by default, the app uses sqlite for storage. you can switch to json files:
-
-```bash
-# use json file storage (no database needed)
-STORAGE_ADAPTER=json bun run dev
-
-# use sqlite (default)
-STORAGE_ADAPTER=sqlite bun run dev
-```
-
-### creating your own adapter
-
-want to use redis, postgres, or another storage backend? implement the `StorageAdapter` interface:
-
-```typescript
-// src/db/adapters/my-adapter.ts
-import type { StorageAdapter, ChatMessage } from './base'
-
-export class MyAdapter implements StorageAdapter {
-  saveMessage(message: ChatMessage): void {
-    // save and auto-prune to keep last 20
-  }
-
-  getRecentMessages(limit = 20): ChatMessage[] {
-    // return messages oldest-first
-  }
-
-  getAllMessages(): ChatMessage[] {
-    // return all messages for export
-  }
-
-  getMessageCount(): number {
-    // return count
-  }
-}
-```
-
-then update `src/db/messages.ts` to use it:
-
-```typescript
-case 'myadapter':
-  return new MyAdapter()
-```
+the server listens on port 3891. start your tunnel against that port and open the https url.
 
 ### environment variables
 
-- `PORT` - server port (default: 3891)
-- `BASE_URL` - base url for oauth (usually auto-detected)
-- `STORAGE_ADAPTER` - storage backend (sqlite|json)
-
-## customization
-
-### changing the app name
-
-update `src/shared/config.ts`:
-
-```typescript
-export const APP_CONFIG = {
-  port: 3891,
-  appName: 'your club name',
-  appUrl: BASE_URL
-}
-```
-
-### changing the styling
-
-all css is in `src/public/css/main.css`. the design uses:
-- gt maru font family
-- y2k aesthetic with bold borders
-- pink (#ff69b4) and teal (#20b2aa) colors
-
-### adding features
-
-the codebase is organized by feature:
-- `src/server/` - server routes and setup
-- `src/db/` - storage and database
-- `src/public/` - frontend html/css/js
-- `src/bluesky/` - bluesky api integration
-
-## deployment
-
-### fly.io
-
-```bash
-# install flyctl
-brew install flyctl
-
-# login
-flyctl auth login
-
-# create app
-flyctl launch
-
-# deploy
-flyctl deploy
-```
-
-### railway
-
-1. connect your github repo
-2. select the fc directory
-3. set build command: `bun install`
-4. set start command: `bun run src/server/index.ts`
-5. add ffmpeg buildpack
-
-### render
-
-1. create new web service
-2. connect github repo
-3. build command: `bun install`
-4. start command: `bun run src/server/index.ts`
-5. add environment variable: `PORT=10000`
-
-## privacy
-
-the app stores:
-- last 20 messages only (auto-deleted)
-- user handles and dids
-- video data urls (deleted with messages)
-- oauth sessions (in-memory, lost on restart)
-
-no analytics, no tracking, no third-party services.
+- `OAUTH_PRIVATE_KEY` (required): ES256 private JWK from `npm run keygen`. signs token requests; the public half is served at `/jwks.json`
+- `COOKIE_SECRET` (required): signs the session cookie. changing it logs everyone out, which is harmless
+- `BASE_URL`: public https origin. auto-detected from request headers when unset, but set it in production
+- `PORT`: default 3891
+- `DATA_DIR`: where `chat.db` lives, default `data`
+- `STORAGE_ADAPTER`: `sqlite` (default) or `json` for the message cache. oauth sessions always use sqlite
 
 ## how it works
 
-### oauth flow
+### data flow
 
-1. user enters bluesky handle
-2. server resolves handle to did
-3. redirect to bluesky oauth
-4. bluesky redirects back with code
-5. server exchanges code for access token
-6. token stored server-side for posting
+1. `POST /api/message` converts the clip to mp4, uploads it as a blob, and creates an `is.keith.fc.message` record on the user's PDS (plus an `app.bsky.feed.post` if they cross-post)
+2. jetstream sees the new record and sends it back to the server
+3. the server validates it against the lexicon, caches it, and broadcasts it over `/ws`
 
-### video recording
+deletes work the same way. the jetstream cursor is saved in sqlite, so a restart picks up where it left off.
 
-1. record 2 seconds of webcam video
-2. convert to webm/mp4 format
-3. encode as data url for storage
-4. if posting to bluesky, upload as blob to user's pds
+### login
 
-### websocket chat
+- oauth sessions (tokens + DPoP keys) are stored in sqlite and last up to 180 days
+- the browser gets a signed, httpOnly `fc_session` cookie holding only the user's DID
+- the expiration job restores a user's session by DID, so expiring messages get deleted even when the author is offline
+- `POST /oauth/logout` revokes the session and clears the cookie
 
-1. client connects to `/ws`
-2. server sends last 20 messages
-3. new messages broadcast to all connected clients
-4. messages auto-saved and pruned to 20
+requested scopes: `atproto repo:is.keith.fc.message repo:app.bsky.feed.post?action=create&action=delete blob:video/mp4`
 
-## troubleshooting
+### lexicons
 
-### oauth not working
+`lexicons/` holds our schema (`is/keith/fc/message.json`) plus the bluesky schemas we use, installed with the `lex` cli and pinned in `lexicons.json`. `src/lexicons/` is generated from them and committed, so there's no build step at deploy.
 
-- make sure you're using a public url (ngrok, cloudflare tunnel, or deployed)
-- use `http://127.0.0.1:3891` not `localhost` for local dev
-- check the browser console for errors
-
-### videos not converting
-
-- make sure ffmpeg is installed (`ffmpeg -version`)
-- check server logs for conversion errors
-- videos must be under 16mb
-
-### database errors
-
-if you see "no such column: user_handle":
 ```bash
-# delete old database
-rm data/chat.db
-
-# recreate
-bun run db:setup
+npm run lexicons:build    # regenerate src/lexicons after editing a schema
+npm run lexicons:update   # re-fetch the bluesky schemas, then regenerate
 ```
 
-## contributing
+### publishing the lexicon
 
-this is a personal project by keith, but feel free to fork and customize for your own communities!
+so other atproto tools can resolve `is.keith.fc.message`:
 
-ideas for improvements:
-- rate limiting
-- moderation tools
-- user profiles
-- threads/replies
-- reactions
-- custom themes
+1. add a DNS TXT record at `_lexicon.fc.keith.is` with the value `did=did:plc:t3ehyucfy7ofylu4spnivvmb` (the DID for @keith.is)
+2. `goat lex check-dns lexicons/is/keith/fc/message.json` to confirm it resolves
+3. `goat lex publish --username keith.is lexicons/is/keith/fc/message.json` (use an app password)
+
+## deployment
+
+fc.keith.is runs on keith's deploy system, which builds `main` with railpack on every push (`railpack.json` pins node 24 and installs ffmpeg). the site has `BASE_URL`, `OAUTH_PRIVATE_KEY`, and `COOKIE_SECRET` set, and `DATA_DIR` points at persistent storage so sessions and the jetstream cursor survive deploys.
+
+the site sleeps when idle. while it's asleep, jetstream isn't connected and the expiration job doesn't run; on wake it resumes from the saved cursor and catches up on expirations.
+
+## privacy
+
+see `/privacy` on the running site. short version: messages live on your PDS, the server caches the last 20 plus anything waiting to expire, and it keeps your oauth session so it can delete expiring messages for you.
 
 ## license
 

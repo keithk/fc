@@ -1,7 +1,10 @@
 {
   "$schema": "https://schema.railpack.com",
+  "packages": {
+    "node": "24"
+  },
   "deploy": {
-    "startCommand": "bun run start",
+    "startCommand": "npm run start",
     "aptPackages": ["ffmpeg"]
   }
 }

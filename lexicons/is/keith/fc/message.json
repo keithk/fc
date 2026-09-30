@@ -4,10 +4,14 @@
   "defs": {
     "main": {
       "type": "record",
+      "description": "A friend club message: a short text and a 2-second video, optionally cross-posted to Bluesky and set to expire.",
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["text", "createdAt"],
+        "required": [
+          "text",
+          "createdAt"
+        ],
         "properties": {
           "text": {
             "type": "string",
@@ -15,7 +19,9 @@
           },
           "video": {
             "type": "blob",
-            "accept": ["video/mp4"],
+            "accept": [
+              "video/mp4"
+            ],
             "maxSize": 10000000
           },
           "blueskyPostUri": {
